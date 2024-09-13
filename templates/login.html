@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, #f2f2f2, #d9d9d9);
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .login-container {
+            background-color: #fff;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            width: 100%;
+            max-width: 500px;
+            text-align: center;
+        }
+
+        .login-container:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        h1 {
+            font-size: 28px;
+            margin-bottom: 20px;
+            color: #333;
+            font-weight: 600;
+        }
+
+        label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 10px;
+            color: #666;
+            text-align: left;
+        }
+
+        select,
+        input[type="password"] {
+            width: 100%;
+            padding: 14px;
+            border-radius: 10px;
+            border: 1px solid #ddd;
+            font-size: 16px;
+            background-color: #f2f2f2;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        select:focus,
+        input[type="password"]:focus {
+            border-color: #ff7043;
+            outline: none;
+            box-shadow: 0 0 5px rgba(255, 112, 67, 0.5);
+        }
+
+        button {
+            padding: 12px 18px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            border: none;
+            cursor: pointer;
+            background-color: #ff7043;
+            color: white;
+            transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+            width: 100%;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.25);
+        }
+
+        button:active {
+            transform: scale(0.97);
+        }
+
+        #passwordField {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="login-container">
+        <h1>Login</h1>
+        <form action="/login" method="POST">
+            <label for="user_type">Choose user type:</label>
+            <select name="user_type" id="user_type" required>
+                <option value="" disabled selected>Select user type</option>
+                <option value="admin">Admin</option>
+                <option value="normal">Normal User</option>
+            </select>
+
+            <!-- Password field, hidden by default -->
+            <div id="passwordField">
+                <label for="password">Admin Password:</label>
+                <input type="password" name="password" id="password" placeholder="Enter admin password">
+            </div>
+
+            <button type="submit">Login</button>
+        </form>
+    </div>
+
+    <script>
+        // Show/hide password field based on user type selection
+        document.getElementById('user_type').addEventListener('change', function () {
+            if (this.value === 'admin') {
+                document.getElementById('passwordField').style.display = 'block';
+            } else {
+                document.getElementById('passwordField').style.display = 'none';
+            }
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech Data Collection (WAV Format)</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, #f5f5f5, #e0e0e0);
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        .header {
+            background-color: #333;
+            color: #fff;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 20px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+        }
+
+        .logo .bracket {
+            color: white;
+        }
+
+        .logo .number {
+            color: #ffab40;
+            font-size: 18px;
+        }
+
+        .logo .ai {
+            color: white;
+            font-size: 18px;
+            margin-left: 2px;
+        }
+
+        .title {
+            color: #ffab40;
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .help-link a {
+            color: #fff;
+            text-decoration: none;
+            font-size: 16px;
+        }
+
+        .help-link a:hover {
+            text-decoration: underline;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 40px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        section {
+            background-color: #fff;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            width: 85%;
+            max-width: 1200px;
+            height: auto;
+        }
+
+        section.hidden {
+            display: none;
+        }
+
+        section:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        h1 {
+            font-size: 28px;
+            margin-bottom: 20px;
+            color: #333;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        .sentence-prompt {
+            font-size: 30px;
+            margin-bottom: 20px;
+            text-align: center;
+            color: #ffab40;
+            font-weight: 700;
+        }
+
+        .recording-status {
+            font-size: 18px;
+            color: #ff5252;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        .recording-animation {
+            width: 20px;
+            height: 20px;
+            background-color: #ff5252;
+            border-radius: 50%;
+            margin: 0 auto;
+            animation: recording-blink 1s infinite;
+        }
+
+        @keyframes recording-blink {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        form {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (min-width: 900px) {
+            form {
+                grid-template-columns: 1fr 1fr 1fr;
+            }
+        }
+
+        form label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: #555;
+        }
+
+        form input,
+        form select {
+            width: 100%;
+            padding: 14px;
+            border-radius: 10px;
+            border: 1px solid #ddd;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+            background-color: #f0f0f0;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        form input:focus,
+        form select:focus {
+            border-color: #ffab40;
+            outline: none;
+            box-shadow: 0 0 5px rgba(255, 171, 64, 0.5);
+        }
+
+        button {
+            padding: 12px 18px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+            width: 100%;
+            max-width: 280px;
+            align-self: center;
+            margin: 10px 0;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.25);
+        }
+
+        button:active {
+            transform: scale(0.97);
+        }
+
+        .btn-primary {
+            background-color: #333;
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background-color: #444;
+        }
+
+        .btn-success {
+            background-color: #ffab40;
+            color: #fff;
+        }
+
+        .btn-success:hover {
+            background-color: #e89b28;
+        }
+
+        .btn-danger {
+            background-color: #dc3545;
+            color: #fff;
+        }
+
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        #audio-playback {
+            width: 100%;
+            margin-top: 25px;
+            border-radius: 10px;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+        }
+
+        #waveform {
+            width: 100%;
+            height: 150px;
+            margin-top: 20px;
+        }
+
+        .controls-wrapper {
+            margin-top: 30px;
+            text-align: center;
+        }
+
+        .sentence-head {
+            color: #555;
+        }
+
+        .sentence-number {
+            color: #808080;
+        }
+    </style>
+</head>
+
+<body>
+    <header class="header">
+        <div class="logo">
+            <span class="bracket">[</span><span class="number">24</span><span class="bracket">]</span>
+            <span class="seven">7</span><span class="ai">.ai</span>
+        </div>
+        <div class="title">Speech Data Collection</div>
+        <div class="help-link">
+            <a href="#">Help</a>
+        </div>
+    </header>
+
+    <div class="main-content">
+        <section id="metadata-section">
+            <h1>Provide Your Information</h1>
+            <form id="metadata-form">
+                <div>
+                    <label for="speaker_id">Username:</label>
+                    <input type="text" id="speaker_id" name="speaker_id" required
+                        placeholder="Give yourself a Username">
+                </div>
+
+                <div>
+                    <label for="state">State:</label>
+                    <select id="state" name="state" required>
+                        <option value="" disabled selected>Select your Native state</option>
+                        <option value="Andhra Pradesh">Andhra Pradesh</option>
+                        <option value="Arunachal Pradesh">Arunachal Pradesh</option>
+                        <option value="Assam">Assam</option>
+                        <option value="Bihar">Bihar</option>
+                        <option value="Chhattisgarh">Chhattisgarh</option>
+                        <option value="Goa">Goa</option>
+                        <option value="Gujarat">Gujarat</option>
+                        <option value="Haryana">Haryana</option>
+                        <option value="Himachal Pradesh">Himachal Pradesh</option>
+                        <option value="Jharkhand">Jharkhand</option>
+                        <option value="Karnataka">Karnataka</option>
+                        <option value="Kerala">Kerala</option>
+                        <option value="Madhya Pradesh">Madhya Pradesh</option>
+                        <option value="Maharashtra">Maharashtra</option>
+                        <option value="Manipur">Manipur</option>
+                        <option value="Meghalaya">Meghalaya</option>
+                        <option value="Mizoram">Mizoram</option>
+                        <option value="Nagaland">Nagaland</option>
+                        <option value="Odisha">Odisha</option>
+                        <option value="Punjab">Punjab</option>
+                        <option value="Rajasthan">Rajasthan</option>
+                        <option value="Sikkim">Sikkim</option>
+                        <option value="Tamil Nadu">Tamil Nadu</option>
+                        <option value="Telangana">Telangana</option>
+                        <option value="Tripura">Tripura</option>
+                        <option value="Uttar Pradesh">Uttar Pradesh</option>
+                        <option value="Uttarakhand">Uttarakhand</option>
+                        <option value="West Bengal">West Bengal</option>
+
+                        <!-- Add other states here -->
+                    </select>
+                </div>
+
+                <div>
+                    <label for="profession">Profession:</label>
+                    <input type="text" id="profession" name="profession" required placeholder="Enter your profession"
+                        value="voice process">
+                </div>
+
+                <!-- <div>
+                    <label for="age">Age:</label>
+                    <input type="number" id="age" name="age" required placeholder="Enter your age" min="0" max="100">
+                </div> -->
+
+                <div>
+                    <label for="gender">Gender:</label>
+                    <select id="gender" name="gender" required>
+                        <option value="" disabled selected>Select your gender</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label for="proficiency">English Proficiency:</label>
+                    <select id="proficiency" name="proficiency" required>
+                        <option value="" disabled selected>Select proficiency level</option>
+                        <option value="beginner">Beginner</option>
+                        <option value="intermediate" selected>Intermediate</option>
+                        <option value="advanced">Advanced</option>
+                        <option value="fluent">Fluent</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label>Have you taken an English proficiency test?</label>
+                    <select id="took_proficiency_test" name="test_taken" required>
+                        <option value="Other" selected>I haven't taken any</option>
+                        <option value="IELTS">IELTS</option>
+                        <option value="TOEFL">TOEFL</option>
+                        <option value="PTE">PTE</option>
+                    </select>
+                </div>
+
+
+                <div style="grid-column: span 2; justify-self: center;">
+                    <button type="button" id="submit-metadata" class="btn-primary">Submit</button>
+                </div>
+            </form>
+        </section>
+
+        <section id="sentence-section" class="hidden">
+            <h1>Record Sentences</h1>
+            <p class="sentence-prompt" id="sentence-prompt"> <span class="sentence-head">Sentence 1:</span> We apologize
+                for the inconvenience; we will definitely resolve this issue as soon as possible.</p>
+
+            <div id="recording-status" class="hidden recording-status">
+                <div class="recording-animation"></div>
+                <p>Recording in progress...</p>
+            </div>
+
+            <div class="controls-wrapper">
+                <button type="button" id="start-recording" class="btn-success">Start Recording</button>
+                <button type="button" id="stop-recording" class="btn-danger hidden">Stop Recording</button>
+                <button type="button" id="re-record" class="btn-warning hidden">Re-record</button>
+            </div>
+
+            <audio id="audio-playback" controls></audio>
+
+            <div id="waveform" class="hidden"></div>
+
+            <div class="controls-wrapper">
+                <button type="button" id="save-recording" class="btn-primary hidden">Save Recording</button>
+            </div>
+        </section>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/wavesurfer.js/5.2.0/wavesurfer.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/recorderjs/0.1.0/recorder.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const metadataForm = document.getElementById('metadata-form');
+            const metadataSection = document.getElementById('metadata-section');
+            const sentenceSection = document.getElementById('sentence-section');
+            const sentencePrompt = document.getElementById('sentence-prompt');
+            const startRecordingBtn = document.getElementById('start-recording');
+            const stopRecordingBtn = document.getElementById('stop-recording');
+            const saveRecordingBtn = document.getElementById('save-recording');
+            const reRecordBtn = document.getElementById('re-record');
+            const audioPlayback = document.getElementById('audio-playback');
+            const recordingStatus = document.getElementById('recording-status');
+            const waveformContainer = document.getElementById('waveform');
+
+            let recorder;
+            let audioBlob;
+            let wavesurfer;
+            let zip = new JSZip();
+            let currentSentenceIndex = 0;
+            const recordings = [];
+            const metadataList = [];
+
+            const sentences = [
+                "We apologize for the inconvenience; we will definitely resolve this issue as soon as possible.",
+                "I’m happy to assist you with your reservation and answer any questions you might have.",
+                "Can you please provide your address so we can ensure the package is sent to the correct location?",
+                "I understand your frustration and will do my best to help you find a solution.",
+                "Please confirm your appointment by calling our office at your earliest convenience.",
+                "We’ll need to verify your identity before we can process your request.",
+                "I’m sorry for the miscommunication; let’s clarify the details to avoid any further issues.",
+                "Your feedback is very valuable to us and will help improve our services.",
+                "Can you repeat the details of your order so we can ensure accuracy?",
+                "I’m here to support you through this process and address any concerns you may have.",
+                "Your satisfaction is our top priority; please let us know if there’s anything else we can do.",
+                "We’ll send you a confirmation email once your order has been processed.",
+                "Could you please clarify the issue so we can assist you more effectively?",
+                "I’m here to resolve the problem and ensure your experience is satisfactory.",
+                "Please describe the problem you’re facing so we can better understand and assist you.",
+                "We appreciate your patience while we work on resolving this matter.",
+                "Our representative will follow up with you shortly to discuss the next steps.",
+                "I’m sorry for the delay; we are working diligently to rectify the situation.",
+                "Please provide us with the necessary information to expedite the process.",
+                "We’ll schedule a follow-up call to ensure that all your concerns are addressed.",
+                "I’ll transfer your call to a specialist who can better assist with your issue.",
+                "We need to document this incident to prevent similar problems in the future.",
+                "Our team is committed to providing high-quality service and support.",
+                "Please accept our apologies for the inconvenience caused by this oversight.",
+                "If you have any additional questions or need further assistance, feel free to ask.",
+                "The issue has been logged, and the judge will make a final decision soon.",
+                "Our team will cheer when we resolve your case successfully.",
+                "Could you please confirm if your payment went through?",
+                "I’ll enjoy assisting you with that order today.",
+                "Please give us a few minutes to process the payment.",
+                "You should receive an email within eight business hours.",
+                "The early morning shift will take care of your request.",
+                "We appreciate your patience; the system is updating now.",
+                "Let me throw in a quick update before we proceed.",
+                "You’ll enjoy the service, and we’ll ensure everything is perfect.",
+                "Please verify the details, and I’ll take care of the rest.",
+                "Your refund request has been approved and will be processed shortly.",
+                "Thank you for your patience; we’ll resolve this issue as soon as possible.",
+                "I’m happy to assist you with any questions regarding your order.",
+                "Could you please verify your identity to proceed with the payment?",
+                "Our team is committed to providing the highest quality support available.",
+                "I’ll need to check with the department; please hold for a moment.",
+                "Your request has been received and will be processed shortly.",
+                "Can you confirm if your payment has gone through successfully?",
+                "Let me transfer you to a specialist who can assist with this inquiry.",
+                "We appreciate your feedback and will use it to improve our services.",
+                "Please provide the necessary details to expedite the resolution process.",
+                "I’m sorry for the delay; we’re working to resolve the issue immediately.",
+                "Can you please describe the issue so we can assist you more effectively?",
+                "You should receive a confirmation email once the request is processed.",
+                "Thank you for calling; we appreciate your patience during this process.",
+                "Our team will follow up with you shortly to ensure everything is resolved.",
+                "Can you repeat the details of your inquiry so I can assist further?",
+                "We’ve received your feedback and will forward it to the appropriate team.",
+                "We’ll need to verify some additional information before processing your request.",
+                "I’m transferring you to a higher-level representative who can help with this matter.",
+                "Please don’t hesitate to reach out if you have any further questions.",
+
+
+            ];
+
+            function initWaveform() {
+                if (wavesurfer) {
+                    wavesurfer.destroy();
+                }
+                wavesurfer = WaveSurfer.create({
+                    container: '#waveform',
+                    waveColor: '#007bff',
+                    progressColor: '#004d40',
+                    cursorColor: '#004d40',
+                    height: 150,
+                    barWidth: 2,
+                    barHeight: 1,
+                    responsive: true
+                });
+            }
+
+            function toggleButtonVisibility(button, isVisible) {
+                if (isVisible) {
+                    button.classList.remove('hidden');
+                } else {
+                    button.classList.add('hidden');
+                }
+            }
+
+            function toggleButtons({ start, stop, reRecord, save }) {
+                toggleButtonVisibility(startRecordingBtn, start);
+                toggleButtonVisibility(stopRecordingBtn, stop);
+                toggleButtonVisibility(reRecordBtn, reRecord);
+                toggleButtonVisibility(saveRecordingBtn, save);
+            }
+
+            async function initRecorder() {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const input = new AudioContext().createMediaStreamSource(stream);
+                recorder = new Recorder(input, { numChannels: 1 });
+            }
+
+            startRecordingBtn.addEventListener('click', async () => {
+                if (!recorder) await initRecorder();
+                initWaveform();
+                recorder.clear();
+                recorder.record();
+                toggleButtons({ start: false, stop: true, reRecord: false, save: false });
+                toggleButtonVisibility(recordingStatus, true);
+            });
+
+            stopRecordingBtn.addEventListener('click', () => {
+                recorder.stop();
+                recorder.exportWAV(function (blob) {
+                    audioBlob = blob;
+                    const audioUrl = URL.createObjectURL(blob);
+                    audioPlayback.src = audioUrl;
+
+                    // Store the recording and metadata
+                    recordings.push({
+                        blob: audioBlob,
+                        sentence: sentences[currentSentenceIndex],
+                        index: currentSentenceIndex
+                    });
+
+                    metadataList.push({
+                        speaker_id: document.getElementById('speaker_id').value,
+                        sentence_index: currentSentenceIndex,
+                        sentence: sentences[currentSentenceIndex],
+                        state: document.getElementById('state').value,
+                        profession: document.getElementById('profession').value,
+                        // age: document.getElementById('age').value,
+                        gender: document.getElementById('gender').value,
+                        proficiency: document.getElementById('proficiency').value,
+                        test_taken: document.getElementById('took_proficiency_test').value
+                    });
+
+                    toggleButtons({ start: false, stop: false, reRecord: true, save: true });
+                    toggleButtonVisibility(recordingStatus, false);
+                    toggleButtonVisibility(waveformContainer, true);
+                    wavesurfer.loadBlob(blob);
+                });
+            });
+
+            reRecordBtn.addEventListener('click', () => {
+                toggleButtons({ start: true, stop: false, reRecord: false, save: false });
+                toggleButtonVisibility(waveformContainer, false);
+                audioPlayback.src = '';
+            });
+
+            saveRecordingBtn.addEventListener('click', () => {
+                moveToNextSentence();
+            });
+
+            function moveToNextSentence() {
+                currentSentenceIndex++;
+                if (currentSentenceIndex < sentences.length) {
+                    let totalSentences = sentences.length;
+                    sentencePrompt.innerHTML = `<span class="sentence-number">(Sentence ${currentSentenceIndex + 1}/${totalSentences}):</span> ${sentences[currentSentenceIndex]}`;
+                    toggleButtons({ start: true, stop: false, reRecord: false, save: false });
+                    toggleButtonVisibility(waveformContainer, false);
+                    audioPlayback.src = '';
+                } else {
+                    sentencePrompt.textContent = "All sentences recorded!";
+                    toggleButtons({ start: false, stop: false, reRecord: false, save: false });
+                    toggleButtonVisibility(waveformContainer, false);
+                    toggleButtonVisibility(audioPlayback, false);
+                    downloadZip();
+                }
+            }
+
+            function downloadZip() {
+                // Add metadata to the ZIP
+                zip.file('metadata.json', JSON.stringify(metadataList));
+
+                // Add all recordings to the ZIP
+                recordings.forEach(record => {
+                    zip.file(`${metadataList[0].speaker_id}_0${record.index}.wav`, record.blob);
+                });
+
+                // Generate the ZIP file
+                zip.generateAsync({ type: 'blob' }).then(function (zipBlob) {
+                    // Trigger the download
+                    const zipUrl = URL.createObjectURL(zipBlob);
+                    const a = document.createElement('a');
+                    a.href = zipUrl;
+                    a.download = `${metadataList[0].speaker_id}.zip`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+
+                    // Send the ZIP to the backend
+                    sendZipToBackend(zipBlob);
+                });
+            }
+
+            function sendZipToBackend(zipBlob) {
+                const formData = new FormData();
+                const zipFileName = `${metadataList[0].speaker_id}.zip`; // Use speaker ID as zip file name
+
+                formData.append('zip_file', zipBlob, zipFileName); // Append zip blob to FormData
+
+                // Send the form data to the backend via a POST request
+                fetch('/upload_zip', {
+                    method: 'POST',
+                    body: formData
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log('Zip file uploaded successfully:', data);
+                    })
+                    .catch(error => {
+                        console.error('Error uploading zip file:', error);
+                    });
+            }
+
+
+            document.getElementById('submit-metadata').addEventListener('click', () => {
+                const speakerId = document.getElementById('speaker_id').value;
+                if (metadataForm.reportValidity()) {
+                    fetch(`/check_user_id?speaker_id=${speakerId}`, {
+                        method: 'GET'
+                    })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.error) {
+                                alert(data.error);
+                            } else {
+                                metadataSection.classList.add('hidden');
+                                sentenceSection.classList.remove('hidden');
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                        });
+                } else {
+                    alert("Please fill out all required fields.");
+                }
+            });
+        });
+    </script>
+
+</body>
+
+</html>

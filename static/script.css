@@ -1,0 +1,50 @@
+document.getElementById('upload-form').addEventListener('submit', async function (event) {
+    event.preventDefault();
+
+    const formData = new FormData();
+    formData.append('file', document.getElementById('audio-file').files[0]);
+
+    const response = await fetch('/upload', {
+        method: 'POST',
+        body: formData
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+        alert(data.error);
+    } else {
+        displayTranscript(data.transcript, data.words, data.phonemes);
+    }
+});
+
+function displayTranscript(transcript, words, phonemes) {
+    const transcriptDiv = document.getElementById('transcript');
+    transcriptDiv.innerHTML = '';
+
+    words.forEach(word => {
+        const wordSpan = document.createElement('span');
+        wordSpan.innerText = word.word + ' ';
+        wordSpan.addEventListener('click', () => playAudioSegment(word.start, word.end));
+        transcriptDiv.appendChild(wordSpan);
+    });
+
+    const phonemeDiv = document.getElementById('phonemes');
+    phonemeDiv.innerHTML = '';
+
+    phonemes.forEach(phoneme => {
+        const phonemeSpan = document.createElement('span');
+        phonemeSpan.innerText = phoneme.phoneme + ' ';
+        phonemeSpan.addEventListener('click', () => playAudioSegment(phoneme.start, phoneme.end));
+        phonemeDiv.appendChild(phonemeSpan);
+    });
+}
+
+function playAudioSegment(start, end) {
+    const audio = document.getElementById('audio-player');
+    audio.currentTime = start;
+    audio.play();
+    setTimeout(() => {
+        audio.pause();
+    }, (end - start) * 1000);
+}
