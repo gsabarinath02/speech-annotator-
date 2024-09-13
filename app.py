@@ -616,4 +616,4 @@ if __name__ == '__main__':
     if not os.path.exists(temp_audio_folder):
         os.makedirs(temp_audio_folder)
 
-    app.run(host='0.0.0.0', debug=True, port=8898, use_reloader=False)
+    app.run(debug=True)
