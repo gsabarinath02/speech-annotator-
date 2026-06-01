@@ -57,6 +57,23 @@ type ToneSegment = { tone: string; tone_key: string; text: string };
 
 const TONE_PATTERN = /^\s*(?:\*\*)?\[([A-Za-z][A-Za-z\s-]*)\](?:\*\*)?\s*/;
 const SESSION_STORAGE_KEY = "outcomes-speech-studio-session";
+const READING_INSTRUCTIONS = [
+  "Maintain a natural, conversational tone.",
+  "Keep a healthcare professional baseline: calm, clear, supportive, and confident.",
+  "Avoid exaggerated acting, dramatic delivery, or overly emotional performance.",
+  "Allow natural pauses at commas, sentence breaks, and transitions.",
+  "Ignore any labels shown inside square brackets, such as [warm] or [instruction]. These are performance notes only and should not be read aloud.",
+  "Do not rush through numbers, dates, addresses, medication names, or dosages.",
+  "Read exactly as written unless a clear typo is present.",
+  "Pronounce all words fully; do not casually drop endings or syllables.",
+  "Keep pacing steady and controlled across the full script.",
+  "For urgent lines, sound calm and focused, not alarming or panicked.",
+  "For reassuring lines, sound supportive and patient, not overly soft or sentimental.",
+  "Keep volume consistent across the full recording.",
+  "Minimize mouth noise, heavy breaths, lip smacks, and trailing vocal fry.",
+  "Avoid strong changes in microphone distance or head movement while reading.",
+  "If you make a mistake, pause, then restart the full sentence cleanly.",
+];
 
 function loadStoredSession(): Session | null {
   if (typeof window === "undefined") return null;
@@ -101,12 +118,14 @@ export function SpeechStudio() {
   const [scripts, setScripts] = useState<Script[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [recordings, setRecordings] = useState<AdminRecording[]>([]);
+  const [instructionsAcknowledged, setInstructionsAcknowledged] = useState(false);
 
   const clearWorkspace = useCallback(() => {
     setSession(null);
     setScripts([]);
     setUsers([]);
     setRecordings([]);
+    setInstructionsAcknowledged(false);
   }, []);
 
   const clearAuthenticatedSession = useCallback((message?: string) => {
@@ -208,6 +227,8 @@ export function SpeechStudio() {
     return <LoginScreen onLogin={handleLoginSuccess} error={error} setError={setError} />;
   }
 
+  const showReadingInstructions = session.user.role !== "admin" && !instructionsAcknowledged;
+
   return (
     <main className="studio-shell">
       <header className="topbar">
@@ -243,6 +264,9 @@ export function SpeechStudio() {
           setNotice={setNotice}
         />
       )}
+      {showReadingInstructions ? (
+        <ReadingInstructionsModal onContinue={() => setInstructionsAcknowledged(true)} />
+      ) : null}
     </main>
   );
 }
@@ -350,6 +374,44 @@ function LoginScreen({
         </div>
       </form>
     </main>
+  );
+}
+
+function ReadingInstructionsModal({ onContinue }: { onContinue: () => void }) {
+  const [confirmed, setConfirmed] = useState(false);
+
+  return (
+    <div className="modal-backdrop">
+      <section
+        className="instruction-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reading-instructions-title"
+        aria-describedby="reading-instructions-description"
+      >
+        <div className="instruction-modal-head">
+          <span className="instruction-kicker">Recording guidance</span>
+          <h1 id="reading-instructions-title">Please read before recording</h1>
+          <p id="reading-instructions-description">
+            These standards help every recording stay clear, consistent, and appropriate for healthcare communication.
+          </p>
+        </div>
+        <ul className="instruction-list">
+          {READING_INSTRUCTIONS.map((instruction) => (
+            <li key={instruction}>{instruction}</li>
+          ))}
+        </ul>
+        <label className="acknowledgement-check">
+          <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+          <span>
+            I have carefully read these instructions and will make every effort to deliver accurate, high-quality recordings.
+          </span>
+        </label>
+        <button className="primary-button full" type="button" disabled={!confirmed} onClick={onContinue}>
+          <Check size={16} /> Continue to recording
+        </button>
+      </section>
+    </div>
   );
 }
 
@@ -1119,9 +1181,9 @@ function ScriptRecorder({
                       const absoluteDistance = Math.abs(distance);
                       const isActiveLine = index === activeLineIndex;
                       const lineStyle = {
-                        "--line-chip-opacity": `${isActiveLine ? 1 : Math.max(0.54, 0.86 - absoluteDistance * 0.08)}`,
-                        "--line-marker-opacity": `${isActiveLine ? 1 : Math.max(0.36, 0.74 - absoluteDistance * 0.08)}`,
-                        "--line-opacity": `${isActiveLine ? 1 : Math.max(0.62, 0.88 - absoluteDistance * 0.065)}`,
+                        "--line-chip-opacity": `${isActiveLine ? 1 : Math.max(0.66, 0.9 - absoluteDistance * 0.05)}`,
+                        "--line-marker-opacity": `${isActiveLine ? 0.96 : Math.max(0.44, 0.72 - absoluteDistance * 0.055)}`,
+                        "--line-opacity": `${isActiveLine ? 1 : Math.max(0.76, 0.94 - absoluteDistance * 0.04)}`,
                         "--line-text-weight": isActiveLine ? 600 : 500,
                       } as CSSProperties;
                       return (
@@ -1261,7 +1323,26 @@ function TonePreview({ segments }: { segments: ToneSegment[] }) {
 }
 
 function ToneChip({ segment }: { segment: ToneSegment }) {
-  return <span className={`tone-chip tone-${segment.tone_key}`}>{formatToneLabel(segment.tone)}</span>;
+  const toneLabel = formatToneLabel(segment.tone);
+  const guidance = getToneGuidance(segment.tone);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+
+  return (
+    <button
+      className={`tone-chip tone-${segment.tone_key}`}
+      type="button"
+      data-tooltip={guidance}
+      data-tooltip-open={tooltipOpen ? "true" : undefined}
+      title={guidance}
+      aria-label={`${toneLabel} tone guidance. ${guidance}`}
+      onBlur={() => setTooltipOpen(false)}
+      onClick={() => setTooltipOpen(true)}
+      onFocus={() => setTooltipOpen(true)}
+      onMouseLeave={() => setTooltipOpen(false)}
+    >
+      <span className="tone-chip-label">{toneLabel}</span>
+    </button>
+  );
 }
 
 function parseToneSegments(text: string): ToneSegment[] {
@@ -1300,6 +1381,30 @@ function formatToneLabel(tone: string) {
     .filter(Boolean)
     .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`)
     .join(" ");
+}
+
+function getToneGuidance(tone: string) {
+  const key = toneKey(tone);
+
+  if (key.includes("urgent")) {
+    return "Sound focused and prompt while staying controlled; do not sound alarmed or panicked.";
+  }
+  if (key.includes("warm") || key.includes("reassuring")) {
+    return "Use a gentle, welcoming tone with clear pronunciation; sound supportive without becoming sentimental.";
+  }
+  if (key.includes("empathetic") || key.includes("acknowledging")) {
+    return "Acknowledge the feeling calmly; keep your voice patient, grounded, and respectful.";
+  }
+  if (key.includes("calm") || key.includes("de-escalating")) {
+    return "Use a steady, reassuring pace; keep volume even and avoid sounding rushed.";
+  }
+  if (key.includes("instruction") || key.includes("verification")) {
+    return "Read clearly and precisely; pause naturally around steps, numbers, names, and medication details.";
+  }
+  if (key.includes("close")) {
+    return "End with a steady, courteous tone; keep it confident and not overly soft.";
+  }
+  return "Read in a natural healthcare-professional tone: calm, clear, supportive, and steady.";
 }
 
 function estimateReadSeconds(segments: ToneSegment[]) {
