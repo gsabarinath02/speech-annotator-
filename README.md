@@ -65,18 +65,32 @@ docker compose up --build
 
 The API runs on `http://localhost:8000` and the web app runs on `http://localhost:3000`.
 
+To run the same single-container image used by Railway:
+
+```bash
+docker build -t outcomes-speech-studio:local .
+docker run --rm -p 8080:8080 \
+  -e APP_ENV=production \
+  -e UPLOAD_DIR=/data/uploads \
+  -e ADMIN_EMAIL=admin@example.com \
+  -e ADMIN_PASSWORD='Admin@12345!' \
+  -e SECRET_KEY='replace-with-a-long-random-production-secret' \
+  -e CORS_ORIGINS=http://localhost:8080 \
+  outcomes-speech-studio:local
+```
+
+Open `http://localhost:8080`.
+
 ## Railway Deployment From GitHub
 
-Deploy this repository as two Railway services from the same GitHub repo.
+The recommended Railway setup is a single container from the repository root. Nginx serves one public URL, proxies `/api` to FastAPI, and sends all other traffic to Next.js.
 
-### 1. API Service
-
-Create a Railway service for the backend:
+Create one Railway service from the GitHub repo:
 
 ```text
-Service name: outcomes-speech-api
-Root directory: backend
-Config file: backend/railway.toml
+Root directory: leave empty / repo root
+Config file: railway.toml
+Dockerfile: Dockerfile
 ```
 
 Set these Railway variables before deploying:
@@ -87,49 +101,49 @@ UPLOAD_DIR=/data/uploads
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=<strong password: 12+ chars with upper, lower, number, symbol>
 SECRET_KEY=<unique random secret, at least 32 characters>
-CORS_ORIGINS=https://your-frontend-service.up.railway.app
+CORS_ORIGINS=https://your-service.up.railway.app
 SESSION_TTL_SECONDS=43200
 PASSWORD_RESET_TTL_SECONDS=1800
 ```
 
-Attach a Railway volume to the API service and mount it at:
+Attach a Railway volume to the service and mount it at:
 
 ```text
 /data/uploads
 ```
 
-That volume stores the saved WAV files and the app state, so recordings and users survive redeploys.
+That volume stores saved WAV files and app state, so recordings and users survive redeploys.
 
-After the first deploy, generate a public Railway domain for the API service. The API health check is available at:
-
-```text
-https://your-api-service.up.railway.app/api/health
-```
-
-### 2. Web Service
-
-Create a second Railway service for the frontend:
+After deploying, generate one public Railway domain. The app and API are available on the same domain:
 
 ```text
-Service name: outcomes-speech-web
-Root directory: frontend
-Config file: frontend/railway.toml
+https://your-service.up.railway.app
+https://your-service.up.railway.app/api/health
 ```
 
-Set this Railway variable before deploying:
+No `NEXT_PUBLIC_API_BASE_URL` is needed for this single-container deployment because the frontend calls `/api` on the same origin.
+
+### Optional Two-Service Deployment
+
+The repository still includes `backend/Dockerfile`, `frontend/Dockerfile`, `backend/railway.toml`, and `frontend/railway.toml` if you prefer separate Railway services later.
+
+For two services, deploy the backend with root directory:
+
+```text
+backend
+```
+
+Deploy the frontend with root directory:
+
+```text
+frontend
+```
+
+Then set this on the frontend:
 
 ```text
 NEXT_PUBLIC_API_BASE_URL=https://your-api-service.up.railway.app
 ```
-
-Redeploy the web service whenever `NEXT_PUBLIC_API_BASE_URL` changes, because the browser app reads that value during the production build.
-
-### 3. Final Production Checks
-
-- Update the API service `CORS_ORIGINS` to the final web service domain.
-- Keep `SECRET_KEY` private and do not reuse the local development secret.
-- Use the Railway volume for production recordings; without it, files can be lost on redeploy.
-- Push to GitHub after setup. Railway will build from each service root directory and redeploy from the connected branch.
 
 ## Verification
 
