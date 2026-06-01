@@ -1,4 +1,5 @@
 fastapi==0.124.2
 uvicorn[standard]==0.38.0
 python-multipart==0.0.20
-
+psycopg[binary]==3.3.4
+psycopg-pool==3.3.1

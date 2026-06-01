@@ -5,6 +5,7 @@ import io
 import os
 import uuid
 import zipfile
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Optional
@@ -23,6 +24,7 @@ from speech_api.services.accounts import (
     NotFoundError,
     TOKEN_TTL_SECONDS,
     PASSWORD_RESET_TTL_SECONDS,
+    PostgresAccountStore,
     sign_token,
     validate_password_strength,
     verify_token,
@@ -66,6 +68,7 @@ class Settings:
         self.upload_dir = Path(upload_dir or default_upload_dir).resolve()
         self.state_path = self.upload_dir / "_state" / "app_state.json"
         self.app_env = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).strip().lower()
+        self.database_url = os.getenv("DATABASE_URL", "").strip()
         self.admin_email = os.getenv("ADMIN_EMAIL", "admin@local.test")
         self.admin_password = os.getenv("ADMIN_PASSWORD", "Admin@12345")
         self.secret_key = os.getenv("SECRET_KEY", "local-development-secret")
@@ -91,21 +94,38 @@ class Settings:
             raise RuntimeError(str(exc)) from exc
         if any(origin == "*" for origin in self.cors_origins):
             raise RuntimeError("CORS_ORIGINS cannot include * in production.")
+        if not self.database_url:
+            raise RuntimeError("DATABASE_URL must be set in production so app data is stored in PostgreSQL.")
 
 
 def create_app(upload_dir: str | Path | None = None) -> FastAPI:
     settings = Settings(upload_dir=upload_dir)
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
 
+    if settings.database_url:
+        account_store = PostgresAccountStore(settings.database_url, settings.admin_email, settings.admin_password, EXAMPLE_SCRIPTS)
+    else:
+        account_store = AccountStore(settings.state_path, settings.admin_email, settings.admin_password, EXAMPLE_SCRIPTS)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            close = getattr(account_store, "close", None)
+            if callable(close):
+                close()
+
     app = FastAPI(
         title="Outcomes Speech Studio API",
         version="1.0.0",
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
+        lifespan=lifespan,
     )
     app.state.settings = settings
-    account_store = AccountStore(settings.state_path, settings.admin_email, settings.admin_password, EXAMPLE_SCRIPTS)
     app.state.account_store = account_store
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -140,6 +160,9 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         return current_user
 
     def collect_recordings() -> list[dict[str, Any]]:
+        if hasattr(account_store, "list_recordings"):
+            return account_store.list_recordings()
+
         recordings: list[dict[str, Any]] = []
         if not settings.upload_dir.exists():
             return recordings
@@ -182,6 +205,9 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         return sorted(recordings, key=lambda item: item.get("timestamp", ""), reverse=True)
 
     def recording_counts() -> dict[str, int]:
+        if hasattr(account_store, "recording_counts"):
+            return account_store.recording_counts()
+
         counts: dict[str, int] = {}
         for recording in collect_recordings():
             user = recording.get("user", {})
@@ -191,12 +217,18 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         return counts
 
     def find_recording(recording_id: str) -> Optional[dict[str, Any]]:
+        if hasattr(account_store, "find_recording"):
+            return account_store.find_recording(recording_id)
+
         for recording in collect_recordings():
             if recording.get("id") == recording_id:
                 return recording
         return None
 
     def select_best_take(recording_id: str) -> dict[str, Any]:
+        if hasattr(account_store, "select_best_take"):
+            return account_store.select_best_take(recording_id)
+
         selected_recording = find_recording(recording_id)
         if not selected_recording:
             raise NotFoundError("Recording not found")
@@ -233,7 +265,14 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
     @app.get("/health")
     @app.get("/api/health")
     def health() -> dict[str, str]:
-        return {"status": "healthy", "message": "Service is running"}
+        store_healthcheck = getattr(account_store, "healthcheck", None)
+        if callable(store_healthcheck) and not store_healthcheck():
+            raise HTTPException(status_code=503, detail="Database is not available")
+        return {
+            "status": "healthy",
+            "message": "Service is running",
+            "database": "postgres" if settings.database_url else "local-json",
+        }
 
     @app.post("/api/auth/login")
     def login(credentials: LoginRequest) -> dict[str, object]:
@@ -464,17 +503,7 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         speaker_dir = settings.upload_dir / speaker_slug
         speaker_dir.mkdir(parents=True, exist_ok=True)
 
-        metadata_path = speaker_dir / f"{speaker_slug}_metadata.json"
-        metadata = read_json(
-            metadata_path,
-            {
-                "user": public_user,
-                "profile": {},
-                "recordings": [],
-            },
-        )
-        metadata["user"] = public_user
-        metadata["profile"] = {
+        profile_payload = {
             "speaker_id": speaker_id or public_user["email"],
             "state": state or "",
             "profession": profession or "",
@@ -497,12 +526,27 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
             "index": resolved_sentence_index,
             "text": resolved_sentence,
         }
-        existing_takes = [
-            item
-            for item in metadata.get("recordings", [])
-            if (item.get("script_id") or item.get("prompt_id") or item.get("script", {}).get("id")) == script_payload["id"]
-        ]
-        take_number = len(existing_takes) + 1
+        if hasattr(account_store, "next_take_number"):
+            take_number = account_store.next_take_number(public_user["id"], str(script_payload["id"]))
+        else:
+            metadata_path = speaker_dir / f"{speaker_slug}_metadata.json"
+            metadata = read_json(
+                metadata_path,
+                {
+                    "user": public_user,
+                    "profile": {},
+                    "recordings": [],
+                },
+            )
+            metadata["user"] = public_user
+            metadata["profile"] = profile_payload
+            existing_takes = [
+                item
+                for item in metadata.get("recordings", [])
+                if (item.get("script_id") or item.get("prompt_id") or item.get("script", {}).get("id")) == script_payload["id"]
+            ]
+            take_number = len(existing_takes) + 1
+
         recording_id = str(uuid.uuid4())
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         filename = safe_name(
@@ -514,6 +558,7 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         recording = {
             "id": recording_id,
             "user_id": public_user["id"],
+            "user": public_user,
             "script_id": script_payload["id"],
             "prompt_id": prompt_payload["id"],
             "take_number": take_number,
@@ -522,6 +567,7 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
             "sentence": resolved_sentence,
             "script": script_payload,
             "prompt": prompt_payload,
+            "profile": profile_payload,
             "file_path": str(file_path),
             "filename": filename,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -529,8 +575,11 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
             "audio": wav_info.to_dict(),
             "storage": {"preserved_original_bytes": True, "server_transcoded": False},
         }
-        metadata.setdefault("recordings", []).append(recording)
-        write_json_atomic(metadata_path, metadata)
+        if hasattr(account_store, "create_recording"):
+            account_store.create_recording(recording)
+        else:
+            metadata.setdefault("recordings", []).append(recording)
+            write_json_atomic(metadata_path, metadata)
 
         return {
             "message": "Recording saved successfully",

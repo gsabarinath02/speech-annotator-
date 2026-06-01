@@ -8,6 +8,7 @@ Production speech collection workspace built with Next.js and FastAPI.
 - Users sign in and record scripts from a clean, low-distraction recording screen.
 - Admins can review users and all saved recordings.
 - Sessions are tracked server-side, can be revoked on logout, and are revoked when a password is reset.
+- Users, sessions, reset tokens, scripts, recording metadata, and best-take choices are stored in PostgreSQL.
 - Recordings are accepted only as uncompressed 48 kHz WAV files.
 - The browser requests raw microphone capture with echo cancellation, noise suppression, and auto gain disabled.
 - Saved recordings are written unchanged; the backend records a SHA-256 digest and does not transcode.
@@ -47,6 +48,7 @@ Set these values before running with `APP_ENV=production`:
 
 ```text
 APP_ENV=production
+DATABASE_URL=postgresql://user:password@host:5432/database
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=<strong password: 12+ chars with upper, lower, number, symbol>
 SECRET_KEY=<unique random secret, at least 32 characters>
@@ -55,7 +57,7 @@ SESSION_TTL_SECONDS=43200
 PASSWORD_RESET_TTL_SECONDS=1800
 ```
 
-In production the API refuses to start if `SECRET_KEY` is missing/weak, the default admin password is still in use, or CORS allows `*`.
+In production the API refuses to start if `DATABASE_URL` is missing, `SECRET_KEY` is missing/weak, the default admin password is still in use, or CORS allows `*`.
 
 ## Docker
 
@@ -63,7 +65,7 @@ In production the API refuses to start if `SECRET_KEY` is missing/weak, the defa
 docker compose up --build
 ```
 
-The API runs on `http://localhost:8000` and the web app runs on `http://localhost:3000`.
+Docker Compose starts PostgreSQL, the API, and the web app. The API runs on `http://localhost:8000` and the web app runs on `http://localhost:3000`.
 
 To run the same single-container image used by Railway:
 
@@ -71,6 +73,7 @@ To run the same single-container image used by Railway:
 docker build -t outcomes-speech-studio:local .
 docker run --rm -p 8080:8080 \
   -e APP_ENV=production \
+  -e DATABASE_URL='postgresql://speech:speechpass@host.docker.internal:5432/speech_studio' \
   -e UPLOAD_DIR=/data/uploads \
   -e ADMIN_EMAIL=admin@example.com \
   -e ADMIN_PASSWORD='Admin@12345!' \
@@ -83,7 +86,7 @@ Open `http://localhost:8080`.
 
 ## Railway Deployment From GitHub
 
-The recommended Railway setup is a single container from the repository root. Nginx serves one public URL, proxies `/api` to FastAPI, and sends all other traffic to Next.js.
+The recommended Railway setup is one app container from the repository root plus one Railway PostgreSQL service. Nginx serves one public URL, proxies `/api` to FastAPI, and sends all other traffic to Next.js.
 
 Create one Railway service from the GitHub repo:
 
@@ -93,10 +96,11 @@ Config file: railway.toml
 Dockerfile: Dockerfile
 ```
 
-Set these Railway variables before deploying:
+Add a PostgreSQL service in the same Railway project. Then set these variables on the app service before deploying:
 
 ```text
 APP_ENV=production
+DATABASE_URL=${{Postgres.DATABASE_URL}}
 UPLOAD_DIR=/data/uploads
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=<strong password: 12+ chars with upper, lower, number, symbol>
@@ -112,7 +116,9 @@ Attach a Railway volume to the service and mount it at:
 /data/uploads
 ```
 
-That volume stores saved WAV files and app state, so recordings and users survive redeploys.
+That volume stores the original WAV files, so recordings survive redeploys without putting large audio blobs in the database.
+
+PostgreSQL stores users, scripts, sessions, reset tokens, recording metadata, audio details, and best-take choices. The volume stores only the original WAV files.
 
 After deploying, generate one public Railway domain. The app and API are available on the same domain:
 
@@ -128,7 +134,7 @@ If Railway shows a 502 or "Application failed to respond", check these first:
 - The Railway service root directory should be empty / repo root, not `backend` or `frontend`.
 - The Railway service should use the root `Dockerfile` and root `railway.toml`.
 - Do not set `PORT`; Railway provides it automatically.
-- Make sure `APP_ENV=production`, `SECRET_KEY`, and `ADMIN_PASSWORD` are valid. The API intentionally refuses to start with weak production secrets.
+- Make sure `APP_ENV=production`, `DATABASE_URL`, `SECRET_KEY`, and `ADMIN_PASSWORD` are valid. The API intentionally refuses to start with weak production secrets or without PostgreSQL.
 - `CORS_ORIGINS` should be the exact Railway app domain, for example `https://your-service.up.railway.app`.
 
 ### Optional Two-Service Deployment
