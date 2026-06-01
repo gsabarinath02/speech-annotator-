@@ -1,0 +1,14 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+node_modules/
+.next/
+coverage/
+.env
+.env.local
+uploads/
+temp_audio/
+*.log

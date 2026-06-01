@@ -1,0 +1,23 @@
+[project]
+name = "outcomes-speech-api"
+version = "1.0.0"
+description = "FastAPI backend for production speech collection."
+requires-python = ">=3.9"
+dependencies = [
+  "fastapi==0.124.2",
+  "uvicorn[standard]==0.38.0",
+  "python-multipart==0.0.20"
+]
+
+[project.optional-dependencies]
+test = [
+  "httpx==0.28.1",
+  "pytest==8.4.2"
+]
+
+[tool.setuptools]
+packages = ["speech_api"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
