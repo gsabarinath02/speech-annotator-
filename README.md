@@ -123,6 +123,14 @@ https://your-service.up.railway.app/api/health
 
 No `NEXT_PUBLIC_API_BASE_URL` is needed for this single-container deployment because the frontend calls `/api` on the same origin.
 
+If Railway shows a 502 or "Application failed to respond", check these first:
+
+- The Railway service root directory should be empty / repo root, not `backend` or `frontend`.
+- The Railway service should use the root `Dockerfile` and root `railway.toml`.
+- Do not set `PORT`; Railway provides it automatically.
+- Make sure `APP_ENV=production`, `SECRET_KEY`, and `ADMIN_PASSWORD` are valid. The API intentionally refuses to start with weak production secrets.
+- `CORS_ORIGINS` should be the exact Railway app domain, for example `https://your-service.up.railway.app`.
+
 ### Optional Two-Service Deployment
 
 The repository still includes `backend/Dockerfile`, `frontend/Dockerfile`, `backend/railway.toml`, and `frontend/railway.toml` if you prefer separate Railway services later.
