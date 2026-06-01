@@ -30,16 +30,22 @@ describe("recording quality checks", () => {
   });
 
   it("warns for clipped, low-volume, or wrong-rate audio", () => {
-    expect(
-      analyzeRecordingQuality({
-        durationSeconds: 3,
-        sampleRate: 44_100,
-        frames: 132_300,
-        peak: 0.99,
-        rms: 0.01,
-        clippedSamples: 12,
-      }).map((warning) => warning.code),
-    ).toEqual(["wrong_sample_rate", "clipping", "low_volume"]);
+    const warnings = analyzeRecordingQuality({
+      durationSeconds: 3,
+      sampleRate: 44_100,
+      frames: 132_300,
+      peak: 0.99,
+      rms: 0.01,
+      clippedSamples: 12,
+    });
+
+    expect(warnings.map((warning) => warning.code)).toEqual(["wrong_sample_rate", "clipping", "low_volume"]);
+    expect(warnings.find((warning) => warning.code === "clipping")?.message).toBe(
+      "Audio is clipping. Move a little farther from the microphone.",
+    );
+    expect(warnings.find((warning) => warning.code === "low_volume")?.message).toBe(
+      "Audio is too quiet. Come closer to the microphone or speak louder.",
+    );
   });
 
   it("calculates peak, rms, and clipped sample count from PCM data", () => {

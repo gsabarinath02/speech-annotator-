@@ -73,7 +73,7 @@ export function analyzeRecordingQuality(recording: RecordingQualityInput): Recor
   if (recording.rms < 0.015 || recording.peak < 0.08) {
     warnings.push({
       code: "low_volume",
-      message: "Volume is low. Speak closer to the microphone or raise input gain.",
+      message: "Audio is too quiet. Come closer to the microphone or speak louder.",
       severity: "warning",
     });
   }
