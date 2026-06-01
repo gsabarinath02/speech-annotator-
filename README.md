@@ -129,11 +129,14 @@ https://your-service.up.railway.app/api/health
 
 No `NEXT_PUBLIC_API_BASE_URL` is needed for this single-container deployment because the frontend calls `/api` on the same origin.
 
+Admin sign-in uses `ADMIN_EMAIL` and `ADMIN_PASSWORD` from Variables. On each deploy, the bootstrap admin user (`id=admin`) is synced to those values in PostgreSQL. If login fails, confirm the Variables match what you type (email is case-insensitive) and redeploy after changing them.
+
 If Railway shows a 502 or "Application failed to respond", check these first:
 
+- In **Settings → Networking → Public networking**, set the target port to **8080** (or remove a custom port so Railway uses the container `EXPOSE` port). Do **not** use **3000** there: port 3000 is only for the internal Next.js process behind nginx.
 - The Railway service root directory should be empty / repo root, not `backend` or `frontend`.
 - The Railway service should use the root `Dockerfile` and root `railway.toml`.
-- Do not set `PORT`; Railway provides it automatically.
+- Do not set `PORT` manually in Variables; Railway provides it automatically.
 - Make sure `APP_ENV=production`, `DATABASE_URL`, `SECRET_KEY`, and `ADMIN_PASSWORD` are valid. The API intentionally refuses to start with weak production secrets or without PostgreSQL.
 - `CORS_ORIGINS` should be the exact Railway app domain, for example `https://your-service.up.railway.app`.
 

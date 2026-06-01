@@ -748,6 +748,7 @@ class PostgresAccountStore(AccountStore):
 
     def _ensure_state(self) -> None:
         now = utc_now()
+        admin_password_hash = hash_password(self.admin_password)
         with self.pool.connection() as connection:
             admin = connection.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1").fetchone()
             if not admin:
@@ -757,7 +758,19 @@ class PostgresAccountStore(AccountStore):
                     VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (email) DO NOTHING
                     """,
-                    ("admin", self.admin_email, "Admin", "admin", hash_password(self.admin_password), now),
+                    ("admin", self.admin_email, "Admin", "admin", admin_password_hash, now),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE users
+                    SET email = %s,
+                        password_hash = %s,
+                        display_name = 'Admin',
+                        role = 'admin'
+                    WHERE id = 'admin'
+                    """,
+                    (self.admin_email, admin_password_hash),
                 )
 
             version_row = connection.execute(
