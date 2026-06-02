@@ -29,6 +29,7 @@ function jsonResponse(payload: unknown, ok = true, status = ok ? 200 : 400) {
 describe("speech studio API helpers", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("logs in with a compact JSON request", async () => {
@@ -180,6 +181,80 @@ describe("speech studio API helpers", () => {
       "http://127.0.0.1:8000/api/admin/scripts/script-1",
       expect.objectContaining({ method: "DELETE", headers: { Authorization: "Bearer session-token" } }),
     );
+  });
+
+  it("reports upload progress while saving a recording", async () => {
+    const uploadListeners = new Map<string, (event: ProgressEvent) => void>();
+
+    class MockXMLHttpRequest {
+      static latest: MockXMLHttpRequest | null = null;
+
+      upload = {
+        addEventListener: vi.fn((event: string, listener: (progressEvent: ProgressEvent) => void) => {
+          uploadListeners.set(event, listener);
+        }),
+      };
+
+      method = "";
+      url = "";
+      headers: Record<string, string> = {};
+      requestBody: FormData | null = null;
+      status = 0;
+      responseText = "";
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      constructor() {
+        MockXMLHttpRequest.latest = this;
+      }
+
+      open(method: string, url: string) {
+        this.method = method;
+        this.url = url;
+      }
+
+      setRequestHeader(name: string, value: string) {
+        this.headers[name] = value;
+      }
+
+      send(body: FormData) {
+        this.requestBody = body;
+      }
+
+      respond(status: number, responseText: string) {
+        this.status = status;
+        this.responseText = responseText;
+        this.onload?.();
+      }
+    }
+
+    vi.stubGlobal("XMLHttpRequest", MockXMLHttpRequest);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(await jsonResponse({}));
+    const formData = new FormData();
+    const progressUpdates: number[] = [];
+
+    const savePromise = saveRecording(formData, "session-token", {
+      onUploadProgress: (progress) => progressUpdates.push(progress),
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(MockXMLHttpRequest.latest?.method).toBe("POST");
+    expect(MockXMLHttpRequest.latest?.url).toBe("http://127.0.0.1:8000/api/recordings");
+    expect(MockXMLHttpRequest.latest?.headers.Authorization).toBe("Bearer session-token");
+    expect(MockXMLHttpRequest.latest?.requestBody).toBe(formData);
+
+    uploadListeners.get("progress")?.({ lengthComputable: true, loaded: 25, total: 100 } as ProgressEvent);
+    MockXMLHttpRequest.latest?.respond(
+      201,
+      JSON.stringify({
+        filename: "script.wav",
+        sha256: "abc123",
+        audio: { sample_rate: 48_000, channels: 1, bits_per_sample: 32, audio_format: "IEEE_FLOAT", duration_seconds: 1 },
+      }),
+    );
+
+    await expect(savePromise).resolves.toMatchObject({ filename: "script.wav", sha256: "abc123" });
+    expect(progressUpdates).toEqual([0.25, 1]);
   });
 
   it("fetches admin recording audio as a protected blob", async () => {

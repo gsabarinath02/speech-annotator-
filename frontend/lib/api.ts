@@ -61,6 +61,10 @@ export type RecordingResponse = {
   };
 };
 
+export type SaveRecordingOptions = {
+  onUploadProgress?: (progress: number) => void;
+};
+
 export type AdminRecording = {
   id: string;
   filename: string;
@@ -281,7 +285,53 @@ export async function checkSpeakerId(speakerId: string) {
   return { ok: response.ok, payload: await response.json() };
 }
 
-export async function saveRecording(formData: FormData, token?: string): Promise<RecordingResponse> {
+function clampUploadProgress(progress: number) {
+  return Math.max(0, Math.min(1, progress));
+}
+
+function saveRecordingWithProgress(
+  formData: FormData,
+  token: string | undefined,
+  onUploadProgress: (progress: number) => void,
+): Promise<RecordingResponse> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+
+    request.open("POST", `${API_BASE_URL}/api/recordings`);
+    if (token) {
+      request.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
+
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onUploadProgress(clampUploadProgress(event.loaded / event.total));
+      }
+    });
+
+    request.onload = () => {
+      const payload = request.responseText ? JSON.parse(request.responseText) : {};
+      if (request.status >= 200 && request.status < 300) {
+        onUploadProgress(1);
+        resolve(payload as RecordingResponse);
+        return;
+      }
+      reject(new ApiError(payload.detail ?? payload.error ?? "Recording could not be saved.", request.status));
+    };
+
+    request.onerror = () => reject(new Error("Recording could not be saved."));
+    request.send(formData);
+  });
+}
+
+export async function saveRecording(
+  formData: FormData,
+  token?: string,
+  options: SaveRecordingOptions = {},
+): Promise<RecordingResponse> {
+  if (options.onUploadProgress && typeof XMLHttpRequest !== "undefined") {
+    return saveRecordingWithProgress(formData, token, options.onUploadProgress);
+  }
+
   const response = await fetch(`${API_BASE_URL}/api/recordings`, {
     method: "POST",
     headers: token ? authHeaders(token) : undefined,

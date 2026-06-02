@@ -94,4 +94,18 @@ describe("reader presentation styles", () => {
     expect(css).toContain(".mic-meter.good");
     expect(css).toContain(".mic-meter.loud");
   });
+
+  it("protects unsaved recordings during upload", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("uploadProgress");
+    expect(component).toContain("Saving...");
+    expect(component).toContain("Retry save");
+    expect(component).toContain("beforeunload");
+    expect(component).toContain("You have an unsaved recording.");
+    expect(component).toContain("onUploadProgress");
+    expect(css).toContain(".upload-progress");
+    expect(css).toContain(".upload-error");
+  });
 });

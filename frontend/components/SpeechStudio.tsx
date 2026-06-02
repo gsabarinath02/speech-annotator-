@@ -61,6 +61,7 @@ type ToneSegment = { tone: string; tone_key: string; text: string };
 const TONE_PATTERN = /^\s*(?:\*\*)?\[([A-Za-z][A-Za-z\s-]*)\](?:\*\*)?\s*/;
 const SESSION_STORAGE_KEY = "outcomes-speech-studio-session";
 const LIVE_INPUT_HINTS = ["Too quiet", "Good level", "Too loud"] as const;
+const UNSAVED_RECORDING_MESSAGE = "You have an unsaved recording.";
 const READING_INSTRUCTIONS = [
   "Maintain a natural, conversational tone.",
   "Keep a healthcare professional baseline: calm, clear, supportive, and confident.",
@@ -894,6 +895,8 @@ function ScriptRecorder({
   const [activeLineIndex, setActiveLineIndex] = useState(0);
   const [autoScroll, setAutoScroll] = useState(false);
   const [liveInputLevel, setLiveInputLevel] = useState<LiveInputLevel>(() => classifyLiveInputLevel(null));
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState("");
   const recorderRef = useRef<TrainingAudioRecorder | null>(null);
   const micMonitorRef = useRef<MicrophoneLevelMonitor | null>(null);
   const scriptScrollRef = useRef<HTMLDivElement | null>(null);
@@ -911,6 +914,8 @@ function ScriptRecorder({
   const hasBlockingQualityWarning = qualityWarnings.some((warning) => warning.severity === "error");
   const captureIsActive = recordingState === "recording" || recordingState === "paused";
   const dockClassName = captureIsActive ? `recorder-dock ${recordingState}` : "recorder-dock";
+  const uploadPercent = Math.round(Math.max(0, Math.min(1, uploadProgress)) * 100);
+  const saveButtonLabel = recordingState === "saving" ? `Saving... ${uploadPercent}%` : uploadError ? "Retry save" : "Save";
   const statusText =
     recordingState === "countdown"
       ? `Starting in ${countdown}`
@@ -918,9 +923,11 @@ function ScriptRecorder({
         ? "Recording"
         : recordingState === "paused"
           ? "Paused"
-          : recording
-            ? "Ready to save"
-            : "Ready";
+          : recordingState === "saving"
+            ? "Saving..."
+            : recording
+              ? "Ready to save"
+              : "Ready";
 
   const updateActiveLineFromScroll = useCallback(() => {
     const scrollElement = scriptScrollRef.current;
@@ -960,6 +967,8 @@ function ScriptRecorder({
     setError("");
     setNotice("");
     setSaveResult(null);
+    setUploadError("");
+    setUploadProgress(0);
     setElapsedSeconds(0);
     manualScrollPauseUntilRef.current = 0;
     micMonitorRef.current?.stop();
@@ -1107,6 +1116,19 @@ function ScriptRecorder({
   }, []);
 
   useEffect(() => {
+    if (!recording) return undefined;
+
+    function warnBeforeLeaving(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = UNSAVED_RECORDING_MESSAGE;
+      return UNSAVED_RECORDING_MESSAGE;
+    }
+
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, [recording]);
+
+  useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.code !== "Space" || event.repeat) return;
 
@@ -1150,6 +1172,8 @@ function ScriptRecorder({
     setRecording(null);
     setRecordingState("idle");
     setSaveResult(null);
+    setUploadError("");
+    setUploadProgress(0);
     setCountdown(0);
     setElapsedSeconds(0);
   }
@@ -1162,6 +1186,8 @@ function ScriptRecorder({
     }
     setError("");
     setNotice("");
+    setUploadError("");
+    setUploadProgress(0);
     setRecordingState("saving");
 
     const formData = new FormData();
@@ -1169,7 +1195,9 @@ function ScriptRecorder({
     formData.append("audio", recording.blob, `${session.user.id}_${String(script.index).padStart(4, "0")}.wav`);
 
     try {
-      const response = await saveRecording(formData, session.token);
+      const response = await saveRecording(formData, session.token, {
+        onUploadProgress: (progress) => setUploadProgress(progress),
+      });
       const nextScriptIndex = nextScriptIndexAfterSave(safeScriptIndex, scripts.length);
       const openedNextTask = nextScriptIndex !== safeScriptIndex;
       const savedTakeLabel = response.take_number ? `Take ${response.take_number}` : "Recording";
@@ -1180,6 +1208,8 @@ function ScriptRecorder({
       if (recording.url) URL.revokeObjectURL(recording.url);
       setRecording(null);
       setRecordingState("idle");
+      setUploadProgress(0);
+      setUploadError("");
       setCountdown(0);
       setElapsedSeconds(0);
       if (openedNextTask) {
@@ -1189,12 +1219,20 @@ function ScriptRecorder({
       await refresh();
       setNotice(openedNextTask ? `${savedTakeLabel} saved. Next task opened.` : `${savedTakeLabel} saved. All tasks complete.`);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Recording could not be saved.");
+      const saveErrorMessage = saveError instanceof Error ? saveError.message : "Recording could not be saved.";
+      setError(saveErrorMessage);
+      setUploadError(`${saveErrorMessage} Your recording is still here. Retry save when ready.`);
       setRecordingState("review");
     }
   }
 
+  function canLeaveUnsavedRecording() {
+    if (!recording) return true;
+    return window.confirm(`${UNSAVED_RECORDING_MESSAGE} Leave without saving it?`);
+  }
+
   function changeScriptIndex(nextIndex: number) {
+    if (!canLeaveUnsavedRecording()) return;
     discardRecording();
     setScriptIndex(nextIndex);
   }
@@ -1366,7 +1404,7 @@ function ScriptRecorder({
                     onClick={saveCurrentRecording}
                     disabled={!recording || recordingState === "saving" || hasBlockingQualityWarning}
                   >
-                    Save
+                    {saveButtonLabel}
                   </button>
                 </div>
               </div>
@@ -1378,6 +1416,8 @@ function ScriptRecorder({
                 <div className="recording-review-panel">
                   {recording ? <audio className="review-audio" controls src={recording.url} /> : null}
                   {recording ? <QualityWarnings warnings={qualityWarnings} /> : null}
+                  {recordingState === "saving" ? <UploadProgress progress={uploadProgress} /> : null}
+                  {uploadError ? <div className="upload-error">{uploadError}</div> : null}
                   {saveResult ? (
                     <span className="saved-note">{saveResult.takeNumber ? `Take ${saveResult.takeNumber} saved` : "Saved"}</span>
                   ) : null}
@@ -1390,6 +1430,18 @@ function ScriptRecorder({
         </div>
       )}
     </section>
+  );
+}
+
+function UploadProgress({ progress }: { progress: number }) {
+  const uploadPercent = Math.round(Math.max(0, Math.min(1, progress)) * 100);
+
+  return (
+    <div className="upload-progress" role="status" aria-live="polite">
+      <span>Saving...</span>
+      <strong>{uploadPercent}%</strong>
+      <progress value={uploadPercent} max={100} aria-label="Upload progress" />
+    </div>
   );
 }
 
