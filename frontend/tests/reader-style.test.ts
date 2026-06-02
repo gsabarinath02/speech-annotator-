@@ -54,4 +54,17 @@ describe("reader presentation styles", () => {
     expect(css).toMatch(/\.tone-chip\[data-tooltip\]:is\(:hover, :focus-visible\)::after/);
     expect(css).toContain('.tone-chip[data-tooltip][data-tooltip-open="true"]::after');
   });
+
+  it("makes countdown and pause/resume controls prominent during recording", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("countdown-overlay");
+    expect(component).toContain("Recording starts in");
+    expect(component).toContain("pause-resume-button");
+    expect(component).toContain("Resume");
+    expect(component).toContain("Pause");
+    expect(css).toContain(".countdown-overlay");
+    expect(css).toContain(".pause-resume-button");
+  });
 });

@@ -933,6 +933,44 @@ p {
   overflow: hidden;
 }
 
+.countdown-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  display: grid;
+  place-items: center;
+  padding: 0 1rem clamp(8rem, 18vh, 11rem);
+  pointer-events: none;
+  background: radial-gradient(circle at center, rgba(255, 255, 255, 0.54), rgba(255, 255, 255, 0) 46%);
+}
+
+.countdown-card {
+  display: grid;
+  justify-items: center;
+  min-width: min(18rem, 84vw);
+  padding: clamp(1rem, 2.6vw, 1.35rem) clamp(1.35rem, 4vw, 2rem);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(19, 16, 45, 0.1);
+  border-radius: 8px;
+  box-shadow: 0 30px 72px rgba(19, 16, 45, 0.18);
+  backdrop-filter: blur(18px);
+}
+
+.countdown-card span {
+  color: var(--body);
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.countdown-card strong {
+  font-size: clamp(4.8rem, 12vw, 7.5rem);
+  font-weight: 600;
+  line-height: 0.95;
+  font-variant-numeric: tabular-nums;
+}
+
 .script-reader-head {
   display: inline-flex;
   align-items: center;
@@ -1215,10 +1253,10 @@ p {
 
 .recorder-control-bar {
   display: grid;
-  grid-template-columns: minmax(13.2rem, 1fr) auto minmax(5.8rem, 7rem) minmax(8.8rem, 10rem);
+  grid-template-columns: minmax(13.2rem, 1fr) auto minmax(5.8rem, 7rem) minmax(14.5rem, 16rem);
   gap: clamp(0.8rem, 2vw, 1.3rem);
   align-items: center;
-  width: min(100%, 50rem);
+  width: min(100%, 56rem);
   min-height: 5.75rem;
   padding: 0.78rem 1.05rem;
   pointer-events: auto;
@@ -1336,6 +1374,34 @@ p {
   background: var(--canvas);
   border: 1px solid var(--line);
   border-radius: 999px;
+}
+
+.pause-resume-button {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+  justify-content: center;
+  min-width: 7.4rem;
+  height: 3.3rem;
+  padding: 0 1rem;
+  color: var(--ink);
+  font-weight: 600;
+  background: #fff;
+  border: 1px solid rgba(19, 16, 45, 0.14);
+  border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(19, 16, 45, 0.08);
+}
+
+.pause-resume-button.pause {
+  color: #7a1f2e;
+  background: #fff5f6;
+  border-color: rgba(211, 67, 90, 0.22);
+}
+
+.pause-resume-button.resume {
+  color: var(--purple);
+  background: var(--purple-soft);
+  border-color: rgba(110, 69, 255, 0.2);
 }
 
 .save-take-button {
@@ -1462,8 +1528,8 @@ progress::-webkit-progress-value {
   }
 
   .recorder-control-bar {
-    width: min(100%, 44rem);
-    grid-template-columns: minmax(12rem, 1fr) auto minmax(4.8rem, 5.8rem) minmax(7.2rem, 8.8rem);
+    width: min(100%, 52rem);
+    grid-template-columns: minmax(12rem, 1fr) auto minmax(4.8rem, 5.8rem) minmax(13.5rem, 15rem);
     min-height: 5.2rem;
   }
 
@@ -1576,6 +1642,10 @@ progress::-webkit-progress-value {
     border-radius: 28px;
   }
 
+  .countdown-overlay {
+    padding-bottom: 9.5rem;
+  }
+
   .dock-quality {
     grid-column: 1;
     grid-row: 1;
@@ -1598,6 +1668,12 @@ progress::-webkit-progress-value {
   .dock-actions {
     grid-column: 1 / -1;
     justify-content: stretch;
+  }
+
+  .pause-resume-button {
+    flex: 1;
+    min-width: 0;
+    height: 2.85rem;
   }
 
   .save-take-button {

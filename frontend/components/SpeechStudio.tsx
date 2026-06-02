@@ -1135,6 +1135,14 @@ function ScriptRecorder({
       ) : (
         <div className="script-recorder">
           <div className="reader-stage">
+            {recordingState === "countdown" ? (
+              <div className="countdown-overlay" aria-live="assertive" aria-label={`Recording starts in ${countdown}`}>
+                <div className="countdown-card">
+                  <span>Recording starts in</span>
+                  <strong>{countdown}</strong>
+                </div>
+              </div>
+            ) : null}
             <article className="script-reader" aria-label="Recording script">
               <div className="reader-title-row">
                 <h1>{scriptDisplayTitle(script)}</h1>
@@ -1249,12 +1257,13 @@ function ScriptRecorder({
                 <div className="dock-actions">
                   {captureIsActive ? (
                     <button
-                      className="icon-action-button"
+                      className={`pause-resume-button ${recordingState === "paused" ? "resume" : "pause"}`}
                       type="button"
                       onClick={recordingState === "paused" ? resumeRecording : pauseRecording}
                       aria-label={recordingState === "paused" ? "Resume recording" : "Pause recording"}
                     >
-                      {recordingState === "paused" ? <Play size={16} /> : <Pause size={16} />}
+                      {recordingState === "paused" ? <Play size={17} /> : <Pause size={17} />}
+                      <span>{recordingState === "paused" ? "Resume" : "Pause"}</span>
                     </button>
                   ) : null}
                   {recording || recordingState === "countdown" ? (
