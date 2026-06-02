@@ -44,6 +44,20 @@ describe("reader presentation styles", () => {
     expect(component).toContain("Continue to recording");
   });
 
+  it("lets readers reopen recording instructions after the first acknowledgement", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("onOpenInstructions");
+    expect(component).toContain("Open recording instructions");
+    expect(component).toContain("Close recording instructions");
+    expect(component).toContain("Close instructions");
+    expect(component).toContain("reader-help-button");
+    expect(component).toContain("instruction-close-button");
+    expect(css).toContain(".reader-help-button");
+    expect(css).toContain(".instruction-close-button");
+  });
+
   it("shows tone guidance from each emotion chip", () => {
     const component = readComponent();
     const css = readFileSync(cssPath, "utf8");

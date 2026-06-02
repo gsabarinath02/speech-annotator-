@@ -22,6 +22,7 @@ import {
   Trash2,
   UserPlus,
   Users,
+  X,
 } from "lucide-react";
 import { CSSProperties, FormEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
@@ -124,6 +125,7 @@ export function SpeechStudio() {
   const [users, setUsers] = useState<User[]>([]);
   const [recordings, setRecordings] = useState<AdminRecording[]>([]);
   const [instructionsAcknowledged, setInstructionsAcknowledged] = useState(false);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
 
   const clearWorkspace = useCallback(() => {
     setSession(null);
@@ -131,6 +133,7 @@ export function SpeechStudio() {
     setUsers([]);
     setRecordings([]);
     setInstructionsAcknowledged(false);
+    setInstructionsOpen(false);
   }, []);
 
   const clearAuthenticatedSession = useCallback((message?: string) => {
@@ -232,7 +235,7 @@ export function SpeechStudio() {
     return <LoginScreen onLogin={handleLoginSuccess} error={error} setError={setError} />;
   }
 
-  const showReadingInstructions = session.user.role !== "admin" && !instructionsAcknowledged;
+  const showReadingInstructions = session.user.role !== "admin" && (!instructionsAcknowledged || instructionsOpen);
 
   return (
     <main className="studio-shell">
@@ -267,10 +270,17 @@ export function SpeechStudio() {
           refresh={() => refreshWorkspace(session)}
           setError={setError}
           setNotice={setNotice}
+          onOpenInstructions={() => setInstructionsOpen(true)}
         />
       )}
       {showReadingInstructions ? (
-        <ReadingInstructionsModal onContinue={() => setInstructionsAcknowledged(true)} />
+        <ReadingInstructionsModal
+          requireAcknowledgement={!instructionsAcknowledged}
+          onContinue={() => {
+            setInstructionsAcknowledged(true);
+            setInstructionsOpen(false);
+          }}
+        />
       ) : null}
     </main>
   );
@@ -382,8 +392,15 @@ function LoginScreen({
   );
 }
 
-function ReadingInstructionsModal({ onContinue }: { onContinue: () => void }) {
+function ReadingInstructionsModal({
+  onContinue,
+  requireAcknowledgement = true,
+}: {
+  onContinue: () => void;
+  requireAcknowledgement?: boolean;
+}) {
   const [confirmed, setConfirmed] = useState(false);
+  const canContinue = requireAcknowledgement ? confirmed : true;
 
   return (
     <div className="modal-backdrop">
@@ -394,6 +411,16 @@ function ReadingInstructionsModal({ onContinue }: { onContinue: () => void }) {
         aria-labelledby="reading-instructions-title"
         aria-describedby="reading-instructions-description"
       >
+        {!requireAcknowledgement ? (
+          <button
+            className="instruction-close-button"
+            type="button"
+            onClick={onContinue}
+            aria-label="Close recording instructions"
+          >
+            <X size={16} />
+          </button>
+        ) : null}
         <div className="instruction-modal-head">
           <span className="instruction-kicker">Recording guidance</span>
           <h1 id="reading-instructions-title">Please read before recording</h1>
@@ -406,14 +433,16 @@ function ReadingInstructionsModal({ onContinue }: { onContinue: () => void }) {
             <li key={instruction}>{instruction}</li>
           ))}
         </ul>
-        <label className="acknowledgement-check">
-          <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-          <span>
-            I have carefully read these instructions and will make every effort to deliver accurate, high-quality recordings.
-          </span>
-        </label>
-        <button className="primary-button full" type="button" disabled={!confirmed} onClick={onContinue}>
-          <Check size={16} /> Continue to recording
+        {requireAcknowledgement ? (
+          <label className="acknowledgement-check">
+            <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+            <span>
+              I have carefully read these instructions and will make every effort to deliver accurate, high-quality recordings.
+            </span>
+          </label>
+        ) : null}
+        <button className="primary-button full" type="button" disabled={!canContinue} onClick={onContinue}>
+          <Check size={16} /> {requireAcknowledgement ? "Continue to recording" : "Close instructions"}
         </button>
       </section>
     </div>
@@ -845,12 +874,14 @@ function ScriptRecorder({
   refresh,
   setError,
   setNotice,
+  onOpenInstructions,
 }: {
   session: Session;
   scripts: Script[];
   refresh: () => Promise<void> | void;
   setError: (value: string) => void;
   setNotice: (value: string) => void;
+  onOpenInstructions: () => void;
 }) {
   const [scriptIndex, setScriptIndex] = useState(0);
   const [recordingState, setRecordingState] = useState<"idle" | "countdown" | "recording" | "paused" | "review" | "saving">(
@@ -1215,13 +1246,25 @@ function ScriptRecorder({
                       <ChevronRight size={18} />
                     </button>
                   </div>
-                  <button
-                    className={autoScroll ? "auto-scroll-toggle active" : "auto-scroll-toggle"}
-                    type="button"
-                    onClick={() => setAutoScroll((enabled) => !enabled)}
-                  >
-                    <Play size={14} /> {autoScroll ? "Auto scroll" : "Manual scroll"}
-                  </button>
+                  <div className="reader-meta-actions">
+                    <button
+                      className="reader-help-button"
+                      type="button"
+                      onClick={onOpenInstructions}
+                      aria-label="Open recording instructions"
+                      title="Recording instructions"
+                    >
+                      <BookOpen size={14} />
+                      <span>Instructions</span>
+                    </button>
+                    <button
+                      className={autoScroll ? "auto-scroll-toggle active" : "auto-scroll-toggle"}
+                      type="button"
+                      onClick={() => setAutoScroll((enabled) => !enabled)}
+                    >
+                      <Play size={14} /> {autoScroll ? "Auto scroll" : "Manual scroll"}
+                    </button>
+                  </div>
                 </div>
                 <div className="script-step-strip" aria-label={`${progress}% complete`}>
                   {scripts.map((item, index) => (

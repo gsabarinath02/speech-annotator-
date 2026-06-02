@@ -229,6 +229,7 @@ p {
 }
 
 .instruction-modal {
+  position: relative;
   display: grid;
   gap: 1rem;
   width: min(100%, 45rem);
@@ -241,9 +242,29 @@ p {
   box-shadow: 0 28px 70px rgba(19, 16, 45, 0.22);
 }
 
+.instruction-close-button {
+  position: absolute;
+  top: 0.8rem;
+  right: 0.8rem;
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  color: var(--body);
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.instruction-close-button:hover {
+  color: var(--ink);
+  border-color: rgba(19, 16, 45, 0.2);
+}
+
 .instruction-modal-head {
   display: grid;
   gap: 0.45rem;
+  padding-right: 2.3rem;
   padding-bottom: 0.8rem;
   border-bottom: 1px solid var(--line);
 }
@@ -996,6 +1017,17 @@ p {
   background: var(--canvas);
 }
 
+.reader-meta-actions {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+  transform: translateY(-50%);
+}
+
+.reader-help-button,
 .auto-scroll-toggle {
   display: inline-flex;
   align-items: center;
@@ -1008,6 +1040,16 @@ p {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 999px;
+}
+
+.reader-help-button {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.reader-help-button:hover:not(:disabled) {
+  border-color: rgba(19, 16, 45, 0.2);
+  background: #fff;
 }
 
 .auto-scroll-toggle.active {
@@ -1077,13 +1119,6 @@ p {
   display: grid;
   place-items: center;
   width: min(100%, 38rem);
-}
-
-.reader-meta-row .auto-scroll-toggle {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
 }
 
 .teleprompter-frame {
@@ -1659,8 +1694,10 @@ progress::-webkit-progress-value {
     gap: 0.45rem;
   }
 
-  .reader-meta-row .auto-scroll-toggle {
+  .reader-meta-actions {
     position: static;
+    flex-wrap: wrap;
+    justify-content: center;
     margin-top: 0.15rem;
     transform: none;
   }
