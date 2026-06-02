@@ -51,6 +51,7 @@ import {
 } from "../lib/api";
 import { analyzeRecordingQuality } from "../lib/audio/quality";
 import { TrainingAudioRecorder, TrainingRecording } from "../lib/audio/recorder";
+import { nextScriptIndexAfterSave } from "../lib/reader-flow";
 
 type AdminTab = "users" | "scripts" | "recordings";
 type ToneSegment = { tone: string; tone_key: string; text: string };
@@ -72,7 +73,9 @@ const READING_INSTRUCTIONS = [
   "Keep volume consistent across the full recording.",
   "Minimize mouth noise, heavy breaths, lip smacks, and trailing vocal fry.",
   "Avoid strong changes in microphone distance or head movement while reading.",
+  "Pause keeps the same take; Resume continues from where you paused.",
   "If you make a mistake, pause, then restart the full sentence cleanly.",
+  "Save moves you to the next task automatically.",
 ];
 
 function loadStoredSession(): Session | null {
@@ -1096,12 +1099,24 @@ function ScriptRecorder({
 
     try {
       const response = await saveRecording(formData, session.token);
-      setSaveResult({ filename: response.filename, sha256: response.sha256, takeNumber: response.take_number });
+      const nextScriptIndex = nextScriptIndexAfterSave(safeScriptIndex, scripts.length);
+      const openedNextTask = nextScriptIndex !== safeScriptIndex;
+      const savedTakeLabel = response.take_number ? `Take ${response.take_number}` : "Recording";
+
+      setSaveResult(
+        openedNextTask ? null : { filename: response.filename, sha256: response.sha256, takeNumber: response.take_number },
+      );
       if (recording.url) URL.revokeObjectURL(recording.url);
       setRecording(null);
       setRecordingState("idle");
+      setCountdown(0);
+      setElapsedSeconds(0);
+      if (openedNextTask) {
+        setScriptIndex(nextScriptIndex);
+        setActiveLineIndex(0);
+      }
       await refresh();
-      setNotice(response.take_number ? `Take ${response.take_number} saved.` : "Saved.");
+      setNotice(openedNextTask ? `${savedTakeLabel} saved. Next task opened.` : `${savedTakeLabel} saved. All tasks complete.`);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Recording could not be saved.");
       setRecordingState("review");

@@ -36,6 +36,8 @@ describe("reader presentation styles", () => {
     const component = readComponent();
 
     expect(component).toContain("READING_INSTRUCTIONS");
+    expect(component).toContain("Save moves you to the next task automatically.");
+    expect(component).toContain("Pause keeps the same take; Resume continues from where you paused.");
     expect(component).toContain(
       "I have carefully read these instructions and will make every effort to deliver accurate, high-quality recordings.",
     );
