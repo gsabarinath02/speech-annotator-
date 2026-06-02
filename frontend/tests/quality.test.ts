@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { analyzePcmQualityStats, analyzeRecordingQuality } from "../lib/audio/quality";
+import { analyzePcmQualityStats, analyzeRecordingQuality, classifyLiveInputLevel } from "../lib/audio/quality";
 
 describe("recording quality checks", () => {
   it("accepts a clean 48 kHz recording", () => {
@@ -54,5 +54,21 @@ describe("recording quality checks", () => {
     expect(stats.peak).toBe(1);
     expect(stats.rms).toBeCloseTo(Math.sqrt((0 + 0.25 + 1 + 0.0625 + 0.9801) / 5));
     expect(stats.clippedSamples).toBe(2);
+  });
+
+  it("classifies live microphone levels into simple recording hints", () => {
+    expect(classifyLiveInputLevel(null)).toMatchObject({ status: "waiting", label: "Checking mic" });
+    expect(classifyLiveInputLevel({ peak: 0.04, rms: 0.009, clippedSamples: 0 })).toMatchObject({
+      status: "quiet",
+      label: "Too quiet",
+    });
+    expect(classifyLiveInputLevel({ peak: 0.32, rms: 0.07, clippedSamples: 0 })).toMatchObject({
+      status: "good",
+      label: "Good level",
+    });
+    expect(classifyLiveInputLevel({ peak: 0.99, rms: 0.18, clippedSamples: 1 })).toMatchObject({
+      status: "loud",
+      label: "Too loud",
+    });
   });
 });

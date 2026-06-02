@@ -1,5 +1,5 @@
 import { buildRawAudioConstraints } from "./constraints";
-import { analyzePcmQualityStats } from "./quality";
+import { analyzePcmQualityStats, PcmQualityStats } from "./quality";
 import { encodeFloat32Wav, mergeFloat32Chunks } from "./wav";
 
 export type TrainingRecording = {
@@ -25,6 +25,8 @@ export class TrainingAudioRecorder {
   private pausedAt = 0;
   private pausedDurationMs = 0;
 
+  constructor(private readonly onLevel?: (stats: PcmQualityStats) => void) {}
+
   async start() {
     this.chunks = [];
     this.paused = false;
@@ -39,6 +41,7 @@ export class TrainingAudioRecorder {
     this.monitor = this.audioContext.createGain();
     this.monitor.gain.value = 0;
     this.worklet.port.onmessage = (event: MessageEvent<Float32Array>) => {
+      this.onLevel?.(analyzePcmQualityStats(event.data));
       if (!this.paused) {
         this.chunks.push(new Float32Array(event.data));
       }

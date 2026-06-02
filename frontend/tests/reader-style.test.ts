@@ -67,4 +67,17 @@ describe("reader presentation styles", () => {
     expect(css).toContain(".countdown-overlay");
     expect(css).toContain(".pause-resume-button");
   });
+
+  it("shows a live microphone meter with simple level hints", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("LiveMicMeter");
+    expect(component).toContain("Too quiet");
+    expect(component).toContain("Good level");
+    expect(component).toContain("Too loud");
+    expect(css).toContain(".mic-meter");
+    expect(css).toContain(".mic-meter.good");
+    expect(css).toContain(".mic-meter.loud");
+  });
 });

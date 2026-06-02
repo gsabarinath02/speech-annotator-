@@ -1295,6 +1295,68 @@ p {
   font-size: 0.78rem;
 }
 
+.mic-meter {
+  display: grid;
+  grid-template-columns: minmax(3.8rem, 5.2rem) auto;
+  gap: 0.48rem;
+  align-items: center;
+  width: min(100%, 9rem);
+  margin-top: 0.25rem;
+  color: var(--muted);
+}
+
+.mic-meter-track {
+  position: relative;
+  height: 0.38rem;
+  overflow: hidden;
+  background: rgba(19, 16, 45, 0.1);
+  border-radius: 999px;
+}
+
+.mic-meter-track span {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: var(--mic-meter-level, 0%);
+  min-width: 0.36rem;
+  background: #9ca3af;
+  border-radius: inherit;
+  transition:
+    width 110ms linear,
+    background 160ms ease;
+}
+
+.mic-meter small {
+  color: currentColor;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mic-meter.quiet {
+  color: #b45309;
+}
+
+.mic-meter.quiet .mic-meter-track span {
+  background: #f59e0b;
+}
+
+.mic-meter.good {
+  color: #15803d;
+}
+
+.mic-meter.good .mic-meter-track span {
+  background: #22c55e;
+}
+
+.mic-meter.loud {
+  color: #b4233b;
+}
+
+.mic-meter.loud .mic-meter-track span {
+  background: #ef4444;
+}
+
 .round-record-button {
   display: inline-grid;
   place-items: center;

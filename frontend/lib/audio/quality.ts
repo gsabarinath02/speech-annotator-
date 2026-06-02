@@ -13,6 +13,14 @@ export type RecordingQualityWarning = {
   severity: "warning" | "error";
 };
 
+export type PcmQualityStats = ReturnType<typeof analyzePcmQualityStats>;
+
+export type LiveInputLevel = {
+  status: "waiting" | "quiet" | "good" | "loud";
+  label: "Checking mic" | "Too quiet" | "Good level" | "Too loud";
+  meter: number;
+};
+
 export function analyzePcmQualityStats(samples: Float32Array) {
   let peak = 0;
   let sumSquares = 0;
@@ -32,6 +40,26 @@ export function analyzePcmQualityStats(samples: Float32Array) {
     rms: samples.length ? Math.sqrt(sumSquares / samples.length) : 0,
     clippedSamples,
   };
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+export function classifyLiveInputLevel(stats: PcmQualityStats | null): LiveInputLevel {
+  if (!stats) {
+    return { status: "waiting", label: "Checking mic", meter: 0 };
+  }
+
+  if (stats.clippedSamples > 0 || stats.peak >= 0.98) {
+    return { status: "loud", label: "Too loud", meter: 1 };
+  }
+
+  if (stats.rms < 0.015 || stats.peak < 0.08) {
+    return { status: "quiet", label: "Too quiet", meter: clamp(stats.peak / 0.08, 0.08, 0.36) };
+  }
+
+  return { status: "good", label: "Good level", meter: clamp(stats.peak / 0.75, 0.42, 0.82) };
 }
 
 export function analyzeRecordingQuality(recording: RecordingQualityInput): RecordingQualityWarning[] {

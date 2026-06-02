@@ -49,7 +49,8 @@ import {
   selectBestTake,
   updateScript,
 } from "../lib/api";
-import { analyzeRecordingQuality } from "../lib/audio/quality";
+import { MicrophoneLevelMonitor } from "../lib/audio/meter";
+import { analyzeRecordingQuality, classifyLiveInputLevel, LiveInputLevel } from "../lib/audio/quality";
 import { TrainingAudioRecorder, TrainingRecording } from "../lib/audio/recorder";
 import { nextScriptIndexAfterSave } from "../lib/reader-flow";
 
@@ -58,6 +59,7 @@ type ToneSegment = { tone: string; tone_key: string; text: string };
 
 const TONE_PATTERN = /^\s*(?:\*\*)?\[([A-Za-z][A-Za-z\s-]*)\](?:\*\*)?\s*/;
 const SESSION_STORAGE_KEY = "outcomes-speech-studio-session";
+const LIVE_INPUT_HINTS = ["Too quiet", "Good level", "Too loud"] as const;
 const READING_INSTRUCTIONS = [
   "Maintain a natural, conversational tone.",
   "Keep a healthcare professional baseline: calm, clear, supportive, and confident.",
@@ -860,7 +862,9 @@ function ScriptRecorder({
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [activeLineIndex, setActiveLineIndex] = useState(0);
   const [autoScroll, setAutoScroll] = useState(false);
+  const [liveInputLevel, setLiveInputLevel] = useState<LiveInputLevel>(() => classifyLiveInputLevel(null));
   const recorderRef = useRef<TrainingAudioRecorder | null>(null);
+  const micMonitorRef = useRef<MicrophoneLevelMonitor | null>(null);
   const scriptScrollRef = useRef<HTMLDivElement | null>(null);
   const lineRefs = useRef<Array<HTMLParagraphElement | null>>([]);
   const programmaticScrollRef = useRef(false);
@@ -927,10 +931,13 @@ function ScriptRecorder({
     setSaveResult(null);
     setElapsedSeconds(0);
     manualScrollPauseUntilRef.current = 0;
+    micMonitorRef.current?.stop();
+    micMonitorRef.current = null;
+    setLiveInputLevel(classifyLiveInputLevel(null));
     if (recording?.url) URL.revokeObjectURL(recording.url);
 
     try {
-      const recorder = new TrainingAudioRecorder();
+      const recorder = new TrainingAudioRecorder((stats) => setLiveInputLevel(classifyLiveInputLevel(stats)));
       recorderRef.current = recorder;
       await recorder.start();
       setRecording(null);
@@ -940,6 +947,39 @@ function ScriptRecorder({
       setRecordingState("idle");
     }
   }, [recording, setError, setNotice]);
+
+  useEffect(() => {
+    const shouldPreviewMic = Boolean(script) && recordingState === "idle" && !recording;
+    if (!shouldPreviewMic) {
+      micMonitorRef.current?.stop();
+      micMonitorRef.current = null;
+      return undefined;
+    }
+
+    let cancelled = false;
+    const monitor = new MicrophoneLevelMonitor();
+    micMonitorRef.current = monitor;
+
+    void monitor
+      .start((stats) => {
+        if (!cancelled) {
+          setLiveInputLevel(classifyLiveInputLevel(stats));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLiveInputLevel(classifyLiveInputLevel(null));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      monitor.stop();
+      if (micMonitorRef.current === monitor) {
+        micMonitorRef.current = null;
+      }
+    };
+  }, [recording, recordingState, script]);
 
   const stopRecording = useCallback(async () => {
     if (!recorderRef.current) return;
@@ -1235,6 +1275,7 @@ function ScriptRecorder({
                   <span>
                     <strong>High Quality WAV</strong>
                     <small>48kHz - 32-bit - Mono</small>
+                    <LiveMicMeter level={liveInputLevel} />
                   </span>
                 </div>
                 <button
@@ -1325,6 +1366,23 @@ function QualityWarnings({ warnings }: { warnings: ReturnType<typeof analyzeReco
           {warning.message}
         </span>
       ))}
+    </div>
+  );
+}
+
+function LiveMicMeter({ level }: { level: LiveInputLevel }) {
+  const meterStyle = { "--mic-meter-level": `${Math.round(level.meter * 100)}%` } as CSSProperties;
+
+  return (
+    <div
+      className={`mic-meter ${level.status}`}
+      aria-label={`Microphone level: ${level.label}`}
+      data-hints={LIVE_INPUT_HINTS.join(", ")}
+    >
+      <span className="mic-meter-track" aria-hidden="true">
+        <span style={meterStyle} />
+      </span>
+      <small>{level.label}</small>
     </div>
   );
 }
