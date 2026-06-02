@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import uuid
 import zipfile
@@ -29,7 +30,13 @@ from speech_api.services.accounts import (
     validate_password_strength,
     verify_token,
 )
-from speech_api.services.audio import WavValidationError, validate_training_wav
+from speech_api.services.audio import WavValidationError, analyze_training_audio, validate_training_wav
+from speech_api.services.dataset import (
+    build_dataset_dashboard,
+    build_manifest_recording,
+    enrich_script_payload,
+    normalize_review_status,
+)
 from speech_api.services.storage import read_json, safe_name, write_json_atomic
 
 
@@ -60,6 +67,37 @@ class PromptCreateRequest(BaseModel):
 class ScriptCreateRequest(BaseModel):
     title: str = ""
     text: str
+
+
+class AssignmentCreateRequest(BaseModel):
+    user_ids: list[str]
+    script_ids: list[str]
+
+
+class RecordingReviewRequest(BaseModel):
+    status: str
+    note: str = ""
+
+
+class BulkRecordingReviewRequest(BaseModel):
+    recording_ids: list[str]
+    status: str
+    note: str = ""
+
+
+class RecordingExportRequest(BaseModel):
+    recording_ids: list[str] = []
+    review_status: str = ""
+    accepted_only: bool = False
+    best_take_only: bool = False
+
+
+class DatasetSnapshotCreateRequest(BaseModel):
+    name: str
+    recording_ids: list[str] = []
+    review_status: str = ""
+    accepted_only: bool = False
+    best_take_only: bool = False
 
 
 class Settings:
@@ -191,6 +229,7 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
                             "text": recording.get("sentence", ""),
                         },
                     )
+                    payload["script"] = enrich_script_payload(payload.get("script", {}))
                     payload.setdefault(
                         "prompt",
                         recording.get("script")
@@ -200,6 +239,10 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
                             "text": recording.get("sentence", ""),
                         },
                     )
+                    payload.setdefault("review_status", "pending")
+                    payload.setdefault("review_note", "")
+                    payload.setdefault("reviewed_at", "")
+                    payload.setdefault("quality", {})
                     recordings.append(payload)
 
         return sorted(recordings, key=lambda item: item.get("timestamp", ""), reverse=True)
@@ -224,6 +267,63 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
             if recording.get("id") == recording_id:
                 return recording
         return None
+
+    def list_assignments() -> list[dict[str, Any]]:
+        if hasattr(account_store, "list_assignments"):
+            return account_store.list_assignments()
+        return []
+
+    def filter_recordings_for_manifest(
+        recording_ids: list[str],
+        review_status: str = "",
+        accepted_only: bool = False,
+        best_take_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        requested_ids = {recording_id for recording_id in recording_ids if recording_id}
+        recordings = collect_recordings()
+        if requested_ids:
+            recordings = [recording for recording in recordings if recording.get("id") in requested_ids]
+        clean_status = review_status.strip().lower()
+        if accepted_only:
+            clean_status = "accepted"
+        if clean_status:
+            recordings = [recording for recording in recordings if recording.get("review_status", "pending") == clean_status]
+        if best_take_only:
+            recordings = [recording for recording in recordings if recording.get("is_best_take")]
+        return recordings
+
+    def update_recording_review(recording_id: str, review_status: str, review_note: str = "") -> dict[str, Any]:
+        if hasattr(account_store, "update_recording_review"):
+            return account_store.update_recording_review(recording_id, review_status, review_note)
+
+        for child in sorted(settings.upload_dir.iterdir()):
+            if not child.is_dir() or child.name == "_state":
+                continue
+            for metadata_path in child.glob("*_metadata.json"):
+                metadata = read_json(metadata_path, {})
+                for recording in metadata.get("recordings", []):
+                    current_id = recording.get("id") or recording.get("sha256")
+                    if current_id != recording_id:
+                        continue
+                    recording["review_status"] = review_status
+                    recording["review_note"] = review_note.strip()
+                    recording["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+                    write_json_atomic(metadata_path, metadata)
+                    refreshed = find_recording(recording_id)
+                    return refreshed or recording
+        raise NotFoundError("Recording not found")
+
+    def bulk_update_recording_review(recording_ids: list[str], review_status: str, review_note: str = "") -> int:
+        if hasattr(account_store, "bulk_update_recording_review"):
+            return account_store.bulk_update_recording_review(recording_ids, review_status, review_note)
+        updated = 0
+        for recording_id in recording_ids:
+            try:
+                update_recording_review(recording_id, review_status, review_note)
+                updated += 1
+            except NotFoundError:
+                continue
+        return updated
 
     def select_best_take(recording_id: str) -> dict[str, Any]:
         if hasattr(account_store, "select_best_take"):
@@ -370,8 +470,11 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get("/api/scripts")
-    def scripts(_current_user: dict[str, Any] = Depends(require_user)) -> dict[str, object]:
-        script_list = account_store.list_scripts()
+    def scripts(current_user: dict[str, Any] = Depends(require_user)) -> dict[str, object]:
+        if hasattr(account_store, "list_scripts_for_user"):
+            script_list = account_store.list_scripts_for_user(current_user)
+        else:
+            script_list = account_store.list_scripts()
         return {
             "count": len(script_list),
             "sample_rate": 48_000,
@@ -410,6 +513,23 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Script not found") from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    @app.get("/api/admin/assignments")
+    def get_assignments(_admin: dict[str, Any] = Depends(require_admin)) -> dict[str, object]:
+        return {"assignments": list_assignments()}
+
+    @app.post("/api/admin/assignments", status_code=201)
+    def create_assignments(
+        assignment_request: AssignmentCreateRequest,
+        _admin: dict[str, Any] = Depends(require_admin),
+    ) -> dict[str, object]:
+        try:
+            assignments = account_store.assign_scripts(assignment_request.user_ids, assignment_request.script_ids)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"assignments": assignments}
+
     @app.get("/api/admin/recordings")
     def list_recordings(_admin: dict[str, Any] = Depends(require_admin)) -> dict[str, object]:
         recordings = collect_recordings()
@@ -443,6 +563,91 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail="Recording not found") from exc
 
+    @app.post("/api/admin/recordings/{recording_id}/review")
+    def review_recording(
+        recording_id: str,
+        review_request: RecordingReviewRequest,
+        _admin: dict[str, Any] = Depends(require_admin),
+    ) -> dict[str, object]:
+        try:
+            review_status = normalize_review_status(review_request.status)
+            return update_recording_review(recording_id, review_status, review_request.note)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Recording not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/api/admin/recordings/bulk-review")
+    def bulk_review_recordings(
+        review_request: BulkRecordingReviewRequest,
+        _admin: dict[str, Any] = Depends(require_admin),
+    ) -> dict[str, object]:
+        try:
+            review_status = normalize_review_status(review_request.status)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        updated = bulk_update_recording_review(review_request.recording_ids, review_status, review_request.note)
+        return {"updated": updated, "review_status": review_status}
+
+    @app.post("/api/admin/recordings/export")
+    def export_recordings(
+        export_request: RecordingExportRequest,
+        _admin: dict[str, Any] = Depends(require_admin),
+    ) -> Response:
+        recordings = filter_recordings_for_manifest(
+            export_request.recording_ids,
+            export_request.review_status,
+            export_request.accepted_only,
+            export_request.best_take_only,
+        )
+        lines = [json.dumps(build_manifest_recording(recording), separators=(",", ":")) for recording in recordings]
+        return Response(
+            content="\n".join(lines) + ("\n" if lines else ""),
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": "attachment; filename=recordings-manifest.jsonl"},
+        )
+
+    @app.get("/api/admin/dataset-dashboard")
+    def dataset_dashboard(_admin: dict[str, Any] = Depends(require_admin)) -> dict[str, object]:
+        return build_dataset_dashboard(
+            account_store.list_users(recording_counts()),
+            account_store.list_scripts(),
+            collect_recordings(),
+            list_assignments(),
+        )
+
+    @app.get("/api/admin/dataset-snapshots")
+    def list_dataset_snapshots(_admin: dict[str, Any] = Depends(require_admin)) -> dict[str, object]:
+        return {"snapshots": account_store.list_dataset_snapshots()}
+
+    @app.post("/api/admin/dataset-snapshots", status_code=201)
+    def create_dataset_snapshot(
+        snapshot_request: DatasetSnapshotCreateRequest,
+        _admin: dict[str, Any] = Depends(require_admin),
+    ) -> dict[str, object]:
+        recordings = filter_recordings_for_manifest(
+            snapshot_request.recording_ids,
+            snapshot_request.review_status,
+            snapshot_request.accepted_only,
+            snapshot_request.best_take_only,
+        )
+        manifest = [build_manifest_recording(recording) for recording in recordings]
+        try:
+            return account_store.create_dataset_snapshot(
+                snapshot_request.name,
+                [str(recording.get("id", "")) for recording in recordings],
+                manifest,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/admin/dataset-snapshots/{snapshot_id}")
+    def get_dataset_snapshot(snapshot_id: str, _admin: dict[str, Any] = Depends(require_admin)) -> dict[str, object]:
+        snapshot = account_store.get_dataset_snapshot(snapshot_id)
+        if not snapshot:
+            raise HTTPException(status_code=404, detail="Dataset snapshot not found")
+        return snapshot
+
     @app.get("/api/prompts")
     def prompts(_current_user: dict[str, Any] = Depends(require_user)) -> dict[str, object]:
         prompt_list = account_store.list_prompts()
@@ -474,6 +679,11 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         state: Annotated[Optional[str], Form()] = None,
         profession: Annotated[Optional[str], Form()] = None,
         gender: Annotated[Optional[str], Form()] = None,
+        accent: Annotated[Optional[str], Form()] = None,
+        age_group: Annotated[Optional[str], Form()] = None,
+        device: Annotated[Optional[str], Form()] = None,
+        noise_condition: Annotated[Optional[str], Form()] = None,
+        domain: Annotated[Optional[str], Form()] = None,
         proficiency: Annotated[Optional[str], Form()] = None,
         test_taken: Annotated[Optional[str], Form()] = None,
         age: Annotated[Optional[str], Form()] = None,
@@ -508,7 +718,12 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
             "state": state or "",
             "profession": profession or "",
             "age": age or "",
+            "age_group": age_group or age or "",
             "gender": gender or "",
+            "accent": accent or "",
+            "device": device or "",
+            "noise_condition": noise_condition or "",
+            "domain": domain or "",
             "proficiency": proficiency or "",
             "test_taken": test_taken or "",
             "test_name": test_name or "",
@@ -521,6 +736,7 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
             "text": resolved_sentence,
             "line_count": script.get("line_count", 1) if script else 1,
         }
+        script_payload = enrich_script_payload(script_payload)
         prompt_payload = {
             "id": script_payload["id"],
             "index": resolved_sentence_index,
@@ -555,6 +771,7 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         file_path = speaker_dir / filename
         file_path.write_bytes(original_bytes)
         digest = hashlib.sha256(original_bytes).hexdigest()
+        quality = analyze_training_audio(original_bytes, resolved_sentence)
         recording = {
             "id": recording_id,
             "user_id": public_user["id"],
@@ -574,6 +791,10 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
             "sha256": digest,
             "audio": wav_info.to_dict(),
             "storage": {"preserved_original_bytes": True, "server_transcoded": False},
+            "quality": quality,
+            "review_status": "pending",
+            "review_note": "",
+            "reviewed_at": "",
         }
         if hasattr(account_store, "create_recording"):
             account_store.create_recording(recording)
@@ -591,6 +812,9 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
             "audio": wav_info.to_dict(),
             "script": script_payload,
             "prompt": prompt_payload,
+            "quality": quality,
+            "review_status": "pending",
+            "review_note": "",
             "storage": {"preserved_original_bytes": True, "server_transcoded": False},
         }
 

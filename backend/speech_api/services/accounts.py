@@ -16,6 +16,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from speech_api.services.dataset import enrich_script_payload
 from speech_api.services.storage import read_json, write_json_atomic
 
 
@@ -244,6 +245,8 @@ class AccountStore:
             "prompts": [{"id": script["id"], "index": script["index"], "text": script["text"], "created_at": script["created_at"]} for script in scripts],
             "sessions": [],
             "password_reset_tokens": [],
+            "script_assignments": [],
+            "dataset_snapshots": [],
             "example_seed_version": EXAMPLE_SEED_VERSION,
         }
 
@@ -281,6 +284,12 @@ class AccountStore:
         if "password_reset_tokens" not in state:
             state["password_reset_tokens"] = []
             changed = True
+        if "script_assignments" not in state:
+            state["script_assignments"] = []
+            changed = True
+        if "dataset_snapshots" not in state:
+            state["dataset_snapshots"] = []
+            changed = True
         if state.get("example_seed_version") != EXAMPLE_SEED_VERSION:
             seed_ids = {seed_script["id"] for seed_script in self.seed_scripts}
             seed_titles = {seed_script["title"].strip().lower() for seed_script in self.seed_scripts}
@@ -314,7 +323,17 @@ class AccountStore:
             self.save(state)
 
     def load(self) -> dict[str, Any]:
-        return read_json(self.state_path, {"users": [], "prompts": [], "sessions": [], "password_reset_tokens": []})
+        return read_json(
+            self.state_path,
+            {
+                "users": [],
+                "prompts": [],
+                "sessions": [],
+                "password_reset_tokens": [],
+                "script_assignments": [],
+                "dataset_snapshots": [],
+            },
+        )
 
     def save(self, state: dict[str, Any]) -> None:
         write_json_atomic(self.state_path, state)
@@ -326,7 +345,7 @@ class AccountStore:
         for segment in tone_segments:
             if segment["tone"] not in tones:
                 tones.append(segment["tone"])
-        return {
+        payload = {
             "id": str(script.get("id") or uuid.uuid4()),
             "index": int(script.get("index", 0)),
             "title": str(script.get("title") or title_from_text(text)).strip(),
@@ -337,6 +356,7 @@ class AccountStore:
             "created_at": script.get("created_at") or utc_now(),
             "updated_at": script.get("updated_at") or script.get("created_at") or utc_now(),
         }
+        return enrich_script_payload(payload)
 
     def _scripts_as_prompts(self, scripts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [
@@ -482,6 +502,9 @@ class AccountStore:
         if len(next_users) == len(users):
             raise NotFoundError("User not found")
         state["users"] = next_users
+        state["script_assignments"] = [
+            assignment for assignment in state.get("script_assignments", []) if assignment.get("user_id") != user_id
+        ]
         self.save(state)
         self.revoke_user_sessions(user_id)
 
@@ -568,6 +591,49 @@ class AccountStore:
         scripts = [self._normalize_script(script) for script in self.load().get("scripts", [])]
         return sorted(scripts, key=lambda script: script.get("index", 0))
 
+    def assigned_script_ids(self, user_id: str) -> set[str]:
+        return {
+            str(assignment.get("script_id", ""))
+            for assignment in self.load().get("script_assignments", [])
+            if assignment.get("user_id") == user_id
+        }
+
+    def list_assignments(self) -> list[dict[str, Any]]:
+        return sorted(self.load().get("script_assignments", []), key=lambda item: item.get("assigned_at", ""))
+
+    def list_scripts_for_user(self, user: dict[str, Any]) -> list[dict[str, Any]]:
+        scripts = self.list_scripts()
+        if user.get("role") == "admin":
+            return scripts
+        assigned = self.assigned_script_ids(str(user["id"]))
+        if not assigned:
+            return scripts
+        return [script for script in scripts if script.get("id") in assigned]
+
+    def assign_scripts(self, user_ids: list[str], script_ids: list[str]) -> list[dict[str, Any]]:
+        clean_user_ids = {str(user_id).strip() for user_id in user_ids if str(user_id).strip()}
+        clean_script_ids = {str(script_id).strip() for script_id in script_ids if str(script_id).strip()}
+        if not clean_user_ids or not clean_script_ids:
+            raise ValueError("At least one user and one script are required")
+        existing_users = {user["id"] for user in self.list_users()}
+        existing_scripts = {script["id"] for script in self.list_scripts()}
+        if not clean_user_ids.issubset(existing_users):
+            raise NotFoundError("User not found")
+        if not clean_script_ids.issubset(existing_scripts):
+            raise NotFoundError("Script not found")
+
+        state = self.load()
+        assignments = state.setdefault("script_assignments", [])
+        existing_pairs = {(item.get("user_id"), item.get("script_id")) for item in assignments}
+        now = utc_now()
+        for user_id in sorted(clean_user_ids):
+            for script_id in sorted(clean_script_ids):
+                if (user_id, script_id) in existing_pairs:
+                    continue
+                assignments.append({"id": str(uuid.uuid4()), "user_id": user_id, "script_id": script_id, "assigned_at": now})
+        self.save(state)
+        return self.list_assignments()
+
     def create_script(self, title: str, text: str) -> dict[str, Any]:
         clean_title = title.strip()
         clean_text = text.strip()
@@ -632,7 +698,41 @@ class AccountStore:
             raise NotFoundError("Script not found")
         state["scripts"] = next_scripts
         state["prompts"] = self._scripts_as_prompts([self._normalize_script(item) for item in next_scripts])
+        state["script_assignments"] = [
+            assignment for assignment in state.get("script_assignments", []) if assignment.get("script_id") != script_id
+        ]
         self.save(state)
+
+    def create_dataset_snapshot(
+        self,
+        name: str,
+        recording_ids: list[str],
+        manifest: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("Snapshot name is required")
+        snapshot = {
+            "id": str(uuid.uuid4()),
+            "name": clean_name,
+            "created_at": utc_now(),
+            "recording_ids": recording_ids,
+            "recording_count": len(manifest),
+            "manifest": manifest,
+        }
+        state = self.load()
+        state.setdefault("dataset_snapshots", []).append(snapshot)
+        self.save(state)
+        return snapshot
+
+    def list_dataset_snapshots(self) -> list[dict[str, Any]]:
+        return sorted(self.load().get("dataset_snapshots", []), key=lambda item: item.get("created_at", ""), reverse=True)
+
+    def get_dataset_snapshot(self, snapshot_id: str) -> Optional[dict[str, Any]]:
+        for snapshot in self.load().get("dataset_snapshots", []):
+            if snapshot.get("id") == snapshot_id:
+                return snapshot
+        return None
 
 
 class PostgresAccountStore(AccountStore):
@@ -736,12 +836,40 @@ class PostgresAccountStore(AccountStore):
             recorded_at TIMESTAMPTZ NOT NULL,
             sha256 TEXT NOT NULL,
             audio JSONB NOT NULL,
-            storage JSONB NOT NULL
+            storage JSONB NOT NULL,
+            quality JSONB NOT NULL DEFAULT '{}'::jsonb,
+            review_status TEXT NOT NULL DEFAULT 'pending',
+            review_note TEXT NOT NULL DEFAULT '',
+            reviewed_at TIMESTAMPTZ
         );
 
         CREATE INDEX IF NOT EXISTS recordings_user_id_idx ON recordings(user_id);
         CREATE INDEX IF NOT EXISTS recordings_script_id_idx ON recordings(script_id);
         CREATE INDEX IF NOT EXISTS recordings_recorded_at_idx ON recordings(recorded_at DESC);
+
+        CREATE TABLE IF NOT EXISTS script_assignments (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            script_id TEXT NOT NULL REFERENCES scripts(id) ON DELETE CASCADE,
+            assigned_at TIMESTAMPTZ NOT NULL,
+            UNIQUE (user_id, script_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS script_assignments_user_id_idx ON script_assignments(user_id);
+        CREATE INDEX IF NOT EXISTS script_assignments_script_id_idx ON script_assignments(script_id);
+
+        CREATE TABLE IF NOT EXISTS dataset_snapshots (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            recording_ids JSONB NOT NULL,
+            manifest JSONB NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL
+        );
+
+        ALTER TABLE recordings ADD COLUMN IF NOT EXISTS quality JSONB NOT NULL DEFAULT '{}'::jsonb;
+        ALTER TABLE recordings ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'pending';
+        ALTER TABLE recordings ADD COLUMN IF NOT EXISTS review_note TEXT NOT NULL DEFAULT '';
+        ALTER TABLE recordings ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
         """
         with self.pool.connection() as connection:
             connection.execute(schema_sql)
@@ -885,6 +1013,10 @@ class PostgresAccountStore(AccountStore):
             "sha256": row["sha256"],
             "audio": row.get("audio") or {},
             "storage": row.get("storage") or {},
+            "quality": row.get("quality") or {},
+            "review_status": row.get("review_status") or "pending",
+            "review_note": row.get("review_note") or "",
+            "reviewed_at": iso_datetime(row.get("reviewed_at")),
         }
 
     def authenticate(self, email: str, password: str) -> Optional[dict[str, Any]]:
@@ -1099,6 +1231,71 @@ class PostgresAccountStore(AccountStore):
             rows = connection.execute("SELECT * FROM scripts ORDER BY script_index, created_at").fetchall()
         return [self._row_to_script(row) for row in rows]
 
+    def assigned_script_ids(self, user_id: str) -> set[str]:
+        with self.pool.connection() as connection:
+            rows = connection.execute("SELECT script_id FROM script_assignments WHERE user_id = %s", (user_id,)).fetchall()
+        return {str(row["script_id"]) for row in rows}
+
+    def list_assignments(self) -> list[dict[str, Any]]:
+        with self.pool.connection() as connection:
+            rows = connection.execute("SELECT * FROM script_assignments ORDER BY assigned_at").fetchall()
+        return [
+            {
+                "id": row["id"],
+                "user_id": row["user_id"],
+                "script_id": row["script_id"],
+                "assigned_at": iso_datetime(row.get("assigned_at")),
+            }
+            for row in rows
+        ]
+
+    def list_scripts_for_user(self, user: dict[str, Any]) -> list[dict[str, Any]]:
+        if user.get("role") == "admin":
+            return self.list_scripts()
+        assigned = self.assigned_script_ids(str(user["id"]))
+        if not assigned:
+            return self.list_scripts()
+        with self.pool.connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM scripts
+                WHERE id = ANY(%s)
+                ORDER BY script_index, created_at
+                """,
+                (list(assigned),),
+            ).fetchall()
+        return [self._row_to_script(row) for row in rows]
+
+    def assign_scripts(self, user_ids: list[str], script_ids: list[str]) -> list[dict[str, Any]]:
+        clean_user_ids = {str(user_id).strip() for user_id in user_ids if str(user_id).strip()}
+        clean_script_ids = {str(script_id).strip() for script_id in script_ids if str(script_id).strip()}
+        if not clean_user_ids or not clean_script_ids:
+            raise ValueError("At least one user and one script are required")
+        with self.pool.connection() as connection:
+            user_rows = connection.execute(
+                "SELECT id FROM users WHERE role = 'user' AND id = ANY(%s)",
+                (list(clean_user_ids),),
+            ).fetchall()
+            script_rows = connection.execute("SELECT id FROM scripts WHERE id = ANY(%s)", (list(clean_script_ids),)).fetchall()
+            found_users = {row["id"] for row in user_rows}
+            found_scripts = {row["id"] for row in script_rows}
+            if found_users != clean_user_ids:
+                raise NotFoundError("User not found")
+            if found_scripts != clean_script_ids:
+                raise NotFoundError("Script not found")
+            now = utc_now()
+            for user_id in sorted(clean_user_ids):
+                for script_id in sorted(clean_script_ids):
+                    connection.execute(
+                        """
+                        INSERT INTO script_assignments (id, user_id, script_id, assigned_at)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (user_id, script_id) DO NOTHING
+                        """,
+                        (str(uuid.uuid4()), user_id, script_id, now),
+                    )
+        return self.list_assignments()
+
     def create_script(self, title: str, text: str) -> dict[str, Any]:
         clean_title = title.strip()
         clean_text = text.strip()
@@ -1190,9 +1387,9 @@ class PostgresAccountStore(AccountStore):
                 INSERT INTO recordings (
                     id, user_id, user_snapshot, script_id, prompt_id, take_number, is_best_take,
                     sentence_index, sentence, script, prompt, profile, file_path, filename,
-                    recorded_at, sha256, audio, storage
+                    recorded_at, sha256, audio, storage, quality, review_status, review_note
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     recording["id"],
@@ -1213,6 +1410,9 @@ class PostgresAccountStore(AccountStore):
                     recording["sha256"],
                     Jsonb(recording["audio"]),
                     Jsonb(recording["storage"]),
+                    Jsonb(recording.get("quality", {})),
+                    recording.get("review_status", "pending"),
+                    recording.get("review_note", ""),
                 ),
             )
         return recording
@@ -1254,6 +1454,42 @@ class PostgresAccountStore(AccountStore):
             ).fetchone()
         return self._row_to_recording(row) if row else None
 
+    def update_recording_review(self, recording_id: str, review_status: str, review_note: str = "") -> dict[str, Any]:
+        with self.pool.connection() as connection:
+            result = connection.execute(
+                """
+                UPDATE recordings
+                SET review_status = %s,
+                    review_note = %s,
+                    reviewed_at = NOW()
+                WHERE id = %s
+                """,
+                (review_status, review_note.strip(), recording_id),
+            )
+            if result.rowcount == 0:
+                raise NotFoundError("Recording not found")
+        refreshed = self.find_recording(recording_id)
+        if not refreshed:
+            raise NotFoundError("Recording not found")
+        return refreshed
+
+    def bulk_update_recording_review(self, recording_ids: list[str], review_status: str, review_note: str = "") -> int:
+        clean_ids = [recording_id for recording_id in recording_ids if recording_id]
+        if not clean_ids:
+            return 0
+        with self.pool.connection() as connection:
+            result = connection.execute(
+                """
+                UPDATE recordings
+                SET review_status = %s,
+                    review_note = %s,
+                    reviewed_at = NOW()
+                WHERE id = ANY(%s)
+                """,
+                (review_status, review_note.strip(), clean_ids),
+            )
+        return int(result.rowcount or 0)
+
     def select_best_take(self, recording_id: str) -> dict[str, Any]:
         selected = self.find_recording(recording_id)
         if not selected:
@@ -1272,3 +1508,60 @@ class PostgresAccountStore(AccountStore):
         if not refreshed:
             raise NotFoundError("Recording not found")
         return refreshed
+
+    def create_dataset_snapshot(
+        self,
+        name: str,
+        recording_ids: list[str],
+        manifest: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("Snapshot name is required")
+        snapshot = {
+            "id": str(uuid.uuid4()),
+            "name": clean_name,
+            "created_at": utc_now(),
+            "recording_ids": recording_ids,
+            "recording_count": len(manifest),
+            "manifest": manifest,
+        }
+        with self.pool.connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO dataset_snapshots (id, name, recording_ids, manifest, created_at)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (snapshot["id"], snapshot["name"], Jsonb(recording_ids), Jsonb(manifest), snapshot["created_at"]),
+            )
+        return snapshot
+
+    def list_dataset_snapshots(self) -> list[dict[str, Any]]:
+        with self.pool.connection() as connection:
+            rows = connection.execute("SELECT * FROM dataset_snapshots ORDER BY created_at DESC").fetchall()
+        return [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "created_at": iso_datetime(row.get("created_at")),
+                "recording_ids": row.get("recording_ids") or [],
+                "recording_count": len(row.get("manifest") or []),
+                "manifest": row.get("manifest") or [],
+            }
+            for row in rows
+        ]
+
+    def get_dataset_snapshot(self, snapshot_id: str) -> Optional[dict[str, Any]]:
+        with self.pool.connection() as connection:
+            row = connection.execute("SELECT * FROM dataset_snapshots WHERE id = %s", (snapshot_id,)).fetchone()
+        if not row:
+            return None
+        manifest = row.get("manifest") or []
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "created_at": iso_datetime(row.get("created_at")),
+            "recording_ids": row.get("recording_ids") or [],
+            "recording_count": len(manifest),
+            "manifest": manifest,
+        }

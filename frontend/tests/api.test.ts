@@ -2,10 +2,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ApiError,
+  assignScripts,
+  bulkReviewRecordings,
   createScript,
+  createDatasetSnapshot,
   createUser,
   createUserPasswordReset,
   deleteScript,
+  exportRecordings,
+  fetchDatasetDashboard,
   fetchMe,
   fetchRecordingAudio,
   fetchScripts,
@@ -15,6 +20,7 @@ import {
   requestPasswordReset,
   saveRecording,
   selectBestTake,
+  updateRecordingReview,
   updateScript,
 } from "../lib/api";
 
@@ -339,6 +345,71 @@ describe("speech studio API helpers", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reset_token: "reset-token", new_password: "NewVoicePass123!" }),
+      }),
+    );
+  });
+
+  it("supports dataset assignment, review, dashboard, export, and snapshots", async () => {
+    const manifestBlob = new Blob(["{}"], { type: "application/x-ndjson" });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(await jsonResponse({ assignments: [{ id: "assignment-1", user_id: "user-1", script_id: "script-1" }] }))
+      .mockResolvedValueOnce(await jsonResponse({ id: "recording-1", review_status: "accepted" }))
+      .mockResolvedValueOnce(await jsonResponse({ updated: 2, review_status: "needs_redo" }))
+      .mockResolvedValueOnce(await jsonResponse({ speaker_progress: [], coverage: {}, script_balance: { tags: {} } }))
+      .mockResolvedValueOnce({ ok: true, blob: () => Promise.resolve(manifestBlob) } as Response)
+      .mockResolvedValueOnce(await jsonResponse({ id: "snapshot-1", name: "asr-healthcare-v1", manifest: [] }));
+
+    await assignScripts("session-token", ["user-1"], ["script-1"]);
+    await updateRecordingReview("session-token", "recording-1", "accepted", "Clean.");
+    await bulkReviewRecordings("session-token", ["recording-1", "recording-2"], "needs_redo", "Redo.");
+    await fetchDatasetDashboard("session-token");
+    const exported = await exportRecordings("session-token", { recordingIds: ["recording-1"] });
+    await createDatasetSnapshot("session-token", { name: "asr-healthcare-v1", recordingIds: ["recording-1"] });
+
+    expect(exported).toBe(manifestBlob);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:8000/api/admin/assignments",
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer session-token", "Content-Type": "application/json" },
+        body: JSON.stringify({ user_ids: ["user-1"], script_ids: ["script-1"] }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:8000/api/admin/recordings/recording-1/review",
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer session-token", "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "accepted", note: "Clean." }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:8000/api/admin/recordings/bulk-review",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ recording_ids: ["recording-1", "recording-2"], status: "needs_redo", note: "Redo." }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:8000/api/admin/dataset-dashboard",
+      { cache: "no-store", headers: { Authorization: "Bearer session-token" } },
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "http://127.0.0.1:8000/api/admin/recordings/export",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      "http://127.0.0.1:8000/api/admin/dataset-snapshots",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "asr-healthcare-v1", recording_ids: ["recording-1"] }),
       }),
     );
   });

@@ -37,8 +37,46 @@ export type Script = {
   line_count: number;
   tone_segments?: Array<{ tone: string; tone_key: string; text: string }>;
   tones?: string[];
+  balance_tags?: string[];
+  pronunciation_notes?: Array<{ kind: string; token: string; note: string }>;
+  phoneme_coverage?: string[];
   created_at?: string;
   updated_at?: string;
+};
+
+export type ReviewStatus = "pending" | "accepted" | "rejected" | "needs_redo";
+
+export type RecordingProfile = {
+  speaker_id?: string;
+  state?: string;
+  profession?: string;
+  age?: string;
+  age_group?: string;
+  gender?: string;
+  accent?: string;
+  device?: string;
+  noise_condition?: string;
+  domain?: string;
+  proficiency?: string;
+  test_taken?: string;
+  test_name?: string;
+  test_score?: string;
+};
+
+export type RecordingQuality = {
+  score?: number;
+  peak?: number;
+  rms?: number;
+  clipped_samples?: number;
+  clipping_percent?: number;
+  silence_ratio?: number;
+  background_noise_db?: number;
+  speed_wpm?: number;
+  pitch?: {
+    min_hz?: number;
+    max_hz?: number;
+    range_hz?: number;
+  };
 };
 
 export type RecordingResponse = {
@@ -47,6 +85,10 @@ export type RecordingResponse = {
   sha256: string;
   take_number?: number;
   is_best_take?: boolean;
+  review_status?: ReviewStatus;
+  review_note?: string;
+  reviewed_at?: string;
+  quality?: RecordingQuality;
   script?: Script;
   audio: {
     sample_rate: number;
@@ -75,8 +117,53 @@ export type AdminRecording = {
   user: User;
   prompt: Prompt;
   script?: Script;
+  profile?: RecordingProfile;
   audio: RecordingResponse["audio"];
   storage?: RecordingResponse["storage"];
+  quality?: RecordingQuality;
+  review_status?: ReviewStatus;
+  review_note?: string;
+  reviewed_at?: string;
+};
+
+export type ScriptAssignment = {
+  id: string;
+  user_id: string;
+  script_id: string;
+  assigned_at?: string;
+};
+
+export type DatasetDashboard = {
+  speaker_progress: Array<{
+    user: User;
+    assigned: number;
+    recorded: number;
+    accepted: number;
+    rejected: number;
+    needs_redo: number;
+    pending: number;
+    remaining: number;
+    consistency: {
+      volume: { average_rms: number; range_rms: number; recording_count: number };
+      speed: { average_wpm: number; range_wpm: number };
+      pitch: { average_range_hz: number; range_hz: number };
+      background_noise: { average_db: number; range_db: number };
+    };
+  }>;
+  coverage: Record<string, Record<string, { recordings: number; duration_seconds: number }>>;
+  script_balance: { tags: Record<string, number>; script_count: number };
+  tone_counts: Record<string, number>;
+  phoneme_coverage: { covered: string[]; missing: string[]; covered_count: number; target_count: number };
+  assignments: ScriptAssignment[];
+};
+
+export type DatasetSnapshot = {
+  id: string;
+  name: string;
+  created_at: string;
+  recording_ids: string[];
+  recording_count: number;
+  manifest: unknown[];
 };
 
 export class ApiError extends Error {
@@ -278,6 +365,107 @@ export async function selectBestTake(token: string, recordingId: string): Promis
     headers: authHeaders(token),
   });
   return readJsonOrThrow<AdminRecording>(response, "Could not choose best take.");
+}
+
+export async function assignScripts(token: string, userIds: string[], scriptIds: string[]): Promise<ScriptAssignment[]> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/assignments`, {
+    method: "POST",
+    headers: { ...authHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ user_ids: userIds, script_ids: scriptIds }),
+  });
+  const payload = await readJsonOrThrow<{ assignments: ScriptAssignment[] }>(response, "Could not assign scripts.");
+  return payload.assignments;
+}
+
+export async function updateRecordingReview(
+  token: string,
+  recordingId: string,
+  status: ReviewStatus,
+  note = "",
+): Promise<AdminRecording> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/recordings/${encodeURIComponent(recordingId)}/review`, {
+    method: "POST",
+    headers: { ...authHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ status, note }),
+  });
+  return readJsonOrThrow<AdminRecording>(response, "Could not update review status.");
+}
+
+export async function bulkReviewRecordings(
+  token: string,
+  recordingIds: string[],
+  status: ReviewStatus,
+  note = "",
+): Promise<{ updated: number; review_status: ReviewStatus }> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/recordings/bulk-review`, {
+    method: "POST",
+    headers: { ...authHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ recording_ids: recordingIds, status, note }),
+  });
+  return readJsonOrThrow<{ updated: number; review_status: ReviewStatus }>(response, "Could not update recordings.");
+}
+
+export async function fetchDatasetDashboard(token: string): Promise<DatasetDashboard> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/dataset-dashboard`, {
+    cache: "no-store",
+    headers: authHeaders(token),
+  });
+  return readJsonOrThrow<DatasetDashboard>(response, "Could not load dataset dashboard.");
+}
+
+export async function exportRecordings(
+  token: string,
+  options: { recordingIds?: string[]; acceptedOnly?: boolean; bestTakeOnly?: boolean; reviewStatus?: ReviewStatus | "" } = {},
+): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/recordings/export`, {
+    method: "POST",
+    headers: { ...authHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      recording_ids: options.recordingIds ?? [],
+      accepted_only: options.acceptedOnly ?? false,
+      best_take_only: options.bestTakeOnly ?? false,
+      review_status: options.reviewStatus ?? "",
+    }),
+  });
+  if (!response.ok) {
+    await readJsonOrThrow(response, "Could not export recordings.");
+  }
+  return response.blob();
+}
+
+export async function fetchDatasetSnapshots(token: string): Promise<DatasetSnapshot[]> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/dataset-snapshots`, {
+    cache: "no-store",
+    headers: authHeaders(token),
+  });
+  const payload = await readJsonOrThrow<{ snapshots: DatasetSnapshot[] }>(response, "Could not load snapshots.");
+  return payload.snapshots;
+}
+
+export async function createDatasetSnapshot(
+  token: string,
+  options: { name: string; recordingIds?: string[]; acceptedOnly?: boolean; bestTakeOnly?: boolean; reviewStatus?: ReviewStatus | "" },
+): Promise<DatasetSnapshot> {
+  const body: {
+    name: string;
+    recording_ids: string[];
+    accepted_only?: boolean;
+    best_take_only?: boolean;
+    review_status?: ReviewStatus | "";
+  } = {
+    name: options.name,
+    recording_ids: options.recordingIds ?? [],
+  };
+  if (typeof options.acceptedOnly === "boolean") body.accepted_only = options.acceptedOnly;
+  if (typeof options.bestTakeOnly === "boolean") body.best_take_only = options.bestTakeOnly;
+  if (typeof options.reviewStatus === "string") body.review_status = options.reviewStatus;
+
+  const response = await fetch(`${API_BASE_URL}/api/admin/dataset-snapshots`, {
+    method: "POST",
+    headers: { ...authHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readJsonOrThrow<DatasetSnapshot>(response, "Could not create dataset snapshot.");
 }
 
 export async function checkSpeakerId(speakerId: string) {

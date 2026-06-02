@@ -4,10 +4,13 @@ import Image from "next/image";
 import {
   ArrowRight,
   AudioLines,
+  BarChart3,
   BookOpen,
   Check,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
+  Download,
   FileText,
   KeyRound,
   LogOut,
@@ -29,17 +32,26 @@ import { CSSProperties, FormEvent, ReactNode, useCallback, useEffect, useRef, us
 import {
   ApiError,
   AdminRecording,
+  DatasetDashboard,
+  DatasetSnapshot,
+  ReviewStatus,
   Script,
   Session,
   User,
+  assignScripts,
+  bulkReviewRecordings,
   confirmPasswordReset,
   createScript,
+  createDatasetSnapshot,
   createUser,
   createUserPasswordReset,
   deleteScript,
   deleteUser,
+  exportRecordings,
   fetchAdminRecordings,
   fetchAdminUsers,
+  fetchDatasetDashboard,
+  fetchDatasetSnapshots,
   fetchMe,
   fetchRecordingAudio,
   fetchScripts,
@@ -48,6 +60,7 @@ import {
   requestPasswordReset,
   saveRecording,
   selectBestTake,
+  updateRecordingReview,
   updateScript,
 } from "../lib/api";
 import { MicrophoneLevelMonitor } from "../lib/audio/meter";
@@ -55,8 +68,17 @@ import { analyzeRecordingQuality, classifyLiveInputLevel, LiveInputLevel } from 
 import { TrainingAudioRecorder, TrainingRecording } from "../lib/audio/recorder";
 import { nextScriptIndexAfterSave } from "../lib/reader-flow";
 
-type AdminTab = "users" | "scripts" | "recordings";
+type AdminTab = "users" | "scripts" | "recordings" | "dataset";
 type ToneSegment = { tone: string; tone_key: string; text: string };
+type RecordingContext = {
+  accent: string;
+  state: string;
+  age_group: string;
+  gender: string;
+  device: string;
+  noise_condition: string;
+  domain: string;
+};
 
 const TONE_PATTERN = /^\s*(?:\*\*)?\[([A-Za-z][A-Za-z\s-]*)\](?:\*\*)?\s*/;
 const SESSION_STORAGE_KEY = "outcomes-speech-studio-session";
@@ -82,39 +104,51 @@ const READING_INSTRUCTIONS = [
   "Save moves you to the next task automatically.",
 ];
 
-function loadStoredSession(): Session | null {
+function getBrowserStorage(): Storage | null {
   if (typeof window === "undefined") return null;
-  const rawSession = window.localStorage.getItem(SESSION_STORAGE_KEY);
+  try {
+    return window.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function loadStoredSession(): Session | null {
+  const storage = getBrowserStorage();
+  if (!storage) return null;
+  const rawSession = storage.getItem(SESSION_STORAGE_KEY);
   if (!rawSession) return null;
 
   try {
     const session = JSON.parse(rawSession) as Partial<Session>;
     if (!session.token || !session.user?.id) {
-      window.localStorage.removeItem(SESSION_STORAGE_KEY);
+      storage.removeItem(SESSION_STORAGE_KEY);
       return null;
     }
     if (session.expires_at) {
       const expiresAt = new Date(session.expires_at).getTime();
       if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-        window.localStorage.removeItem(SESSION_STORAGE_KEY);
+        storage.removeItem(SESSION_STORAGE_KEY);
         return null;
       }
     }
     return session as Session;
   } catch {
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    storage.removeItem(SESSION_STORAGE_KEY);
     return null;
   }
 }
 
 function storeSession(session: Session) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  const storage = getBrowserStorage();
+  if (!storage) return;
+  storage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
 }
 
 function clearStoredSession() {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  const storage = getBrowserStorage();
+  if (!storage) return;
+  storage.removeItem(SESSION_STORAGE_KEY);
 }
 
 export function SpeechStudio() {
@@ -497,6 +531,9 @@ function AdminWorkspace({
         <button className={activeTab === "recordings" ? "rail-button active" : "rail-button"} onClick={() => setActiveTab("recordings")}>
           <AudioLines size={17} /> Recordings
         </button>
+        <button className={activeTab === "dataset" ? "rail-button active" : "rail-button"} onClick={() => setActiveTab("dataset")}>
+          <BarChart3 size={17} /> Dataset
+        </button>
       </nav>
 
       <div className="admin-panel">
@@ -509,6 +546,17 @@ function AdminWorkspace({
         {activeTab === "recordings" ? (
           <AdminRecordings
             token={session.token}
+            recordings={recordings}
+            refresh={refresh}
+            setError={setError}
+            setNotice={setNotice}
+          />
+        ) : null}
+        {activeTab === "dataset" ? (
+          <AdminDataset
+            token={session.token}
+            users={users}
+            scripts={scripts}
             recordings={recordings}
             refresh={refresh}
             setError={setError}
@@ -785,6 +833,7 @@ function ScriptEditor({
         <textarea className="script-textarea" value={draftText} onChange={(event) => setDraftText(event.target.value)} />
       </label>
       <TonePreview segments={previewSegments} />
+      <ScriptTrainingMetadata script={script} draftText={draftText} />
       <div className="script-editor-meta">
         <span>Created {formatShortDate(script.created_at)}</span>
         <span>Updated {formatShortDate(script.updated_at ?? script.created_at)}</span>
@@ -815,6 +864,9 @@ function AdminRecordings({
   setNotice: (value: string) => void;
 }) {
   const [selectingId, setSelectingId] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const selectedCount = selectedIds.length;
 
   async function handleSelectBest(recordingId: string) {
     setSelectingId(recordingId);
@@ -831,23 +883,97 @@ function AdminRecordings({
     }
   }
 
+  function toggleSelected(recordingId: string) {
+    setSelectedIds((current) =>
+      current.includes(recordingId) ? current.filter((item) => item !== recordingId) : [...current, recordingId],
+    );
+  }
+
+  async function handleReview(recordingId: string, reviewStatus: ReviewStatus, note = "") {
+    setError("");
+    setNotice("");
+    try {
+      await updateRecordingReview(token, recordingId, reviewStatus, note);
+      await refresh();
+      setNotice(`Recording marked ${formatReviewStatus(reviewStatus)}.`);
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : "Could not update review status.");
+    }
+  }
+
+  async function handleBulkReview(reviewStatus: ReviewStatus) {
+    if (!selectedIds.length) return;
+    setBulkBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await bulkReviewRecordings(token, selectedIds, reviewStatus, `Bulk marked ${formatReviewStatus(reviewStatus)}.`);
+      await refresh();
+      setSelectedIds([]);
+      setNotice(`${response.updated} recordings updated.`);
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : "Could not update selected recordings.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleExportSelected() {
+    if (!selectedIds.length) return;
+    setError("");
+    setNotice("");
+    try {
+      const blob = await exportRecordings(token, { recordingIds: selectedIds });
+      downloadBlob(blob, "selected-recordings-manifest.jsonl");
+      setNotice("Manifest exported.");
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "Could not export selected recordings.");
+    }
+  }
+
   return (
     <div className="workspace-section">
-      <SectionHead title="Recordings" count={`${recordings.length}`} />
+      <div className="section-head">
+        <h1>Recordings</h1>
+        <div className="recording-bulk-actions">
+          <span className="count-chip">{selectedCount ? `${selectedCount} selected` : `${recordings.length}`}</span>
+          <button className="secondary-button" type="button" onClick={() => void handleBulkReview("accepted")} disabled={!selectedCount || bulkBusy}>
+            <ClipboardCheck size={16} /> Accept
+          </button>
+          <button className="secondary-button" type="button" onClick={() => void handleBulkReview("needs_redo")} disabled={!selectedCount || bulkBusy}>
+            <RotateCcw size={16} /> Redo
+          </button>
+          <button className="secondary-button" type="button" onClick={() => void handleExportSelected()} disabled={!selectedCount}>
+            <Download size={16} /> Export
+          </button>
+        </div>
+      </div>
       <div className="recording-table">
         {recordings.length ? (
           recordings.map((recording) => (
             <div className="recording-row" key={recording.id || recording.sha256}>
+              <label className="row-check" aria-label={`Select ${recording.filename}`}>
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(recording.id)}
+                  onChange={() => toggleSelected(recording.id)}
+                />
+              </label>
               <div>
                 <strong>{recording.user?.display_name || recording.user?.email || "User"}</strong>
                 <span className="take-line">
                   <span className="take-chip">Take {recording.take_number ?? 1}</span>
                   {recording.is_best_take ? <span className="best-chip">Best</span> : null}
+                  <span className={`review-chip ${recording.review_status ?? "pending"}`}>
+                    {formatReviewStatus(recording.review_status ?? "pending")}
+                  </span>
                 </span>
                 <span>{recording.filename}</span>
               </div>
               <p>{recording.script ? scriptDisplayTitle(recording.script) : recording.prompt?.text || "Script"}</p>
               <AudioDetails recording={recording} />
+              <RecordingQualitySummary recording={recording} />
+              <RecordingAudioInspector token={token} recordingId={recording.id} />
               <div className="recording-actions">
                 <RecordingPlayer token={token} recordingId={recording.id} />
                 <button
@@ -858,12 +984,256 @@ function AdminRecordings({
                 >
                   <Check size={16} /> {recording.is_best_take ? "Best" : "Choose"}
                 </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => void handleReview(recording.id, "accepted", "Accepted by reviewer.")}
+                  disabled={recording.review_status === "accepted"}
+                >
+                  <ClipboardCheck size={16} /> Accept
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => void handleReview(recording.id, "needs_redo", "Redo requested by reviewer.")}
+                  disabled={recording.review_status === "needs_redo"}
+                >
+                  <RotateCcw size={16} /> Redo
+                </button>
               </div>
             </div>
           ))
         ) : (
           <EmptyState icon={<AudioLines size={18} />} text="No recordings yet." />
         )}
+      </div>
+    </div>
+  );
+}
+
+function AdminDataset({
+  token,
+  users,
+  scripts,
+  recordings,
+  refresh,
+  setError,
+  setNotice,
+}: {
+  token: string;
+  users: User[];
+  scripts: Script[];
+  recordings: AdminRecording[];
+  refresh: () => Promise<void> | void;
+  setError: (value: string) => void;
+  setNotice: (value: string) => void;
+}) {
+  const [dashboard, setDashboard] = useState<DatasetDashboard | null>(null);
+  const [snapshots, setSnapshots] = useState<DatasetSnapshot[]>([]);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [selectedScriptIds, setSelectedScriptIds] = useState<string[]>([]);
+  const [snapshotName, setSnapshotName] = useState("asr-healthcare-v1");
+  const [loading, setLoading] = useState(false);
+
+  const coverage = dashboard?.coverage ?? {};
+  const speakerProgress = dashboard?.speaker_progress ?? [];
+  const acceptedRecordings = recordings.filter((recording) => recording.review_status === "accepted");
+
+  const loadDataset = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [nextDashboard, nextSnapshots] = await Promise.all([
+        fetchDatasetDashboard(token),
+        fetchDatasetSnapshots(token),
+      ]);
+      setDashboard(nextDashboard);
+      setSnapshots(nextSnapshots);
+    } catch (datasetError) {
+      setError(datasetError instanceof Error ? datasetError.message : "Could not load dataset dashboard.");
+    } finally {
+      setLoading(false);
+    }
+  }, [setError, token]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncDataset() {
+      try {
+        const [nextDashboard, nextSnapshots] = await Promise.all([
+          fetchDatasetDashboard(token),
+          fetchDatasetSnapshots(token),
+        ]);
+        if (!cancelled) {
+          setDashboard(nextDashboard);
+          setSnapshots(nextSnapshots);
+        }
+      } catch (datasetError) {
+        if (!cancelled) {
+          setError(datasetError instanceof Error ? datasetError.message : "Could not load dataset dashboard.");
+        }
+      }
+    }
+
+    void syncDataset();
+    return () => {
+      cancelled = true;
+    };
+  }, [recordings.length, scripts.length, setError, token, users.length]);
+
+  function toggleUser(userId: string) {
+    setSelectedUserIds((current) => (current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId]));
+  }
+
+  function toggleScript(scriptId: string) {
+    setSelectedScriptIds((current) => (current.includes(scriptId) ? current.filter((id) => id !== scriptId) : [...current, scriptId]));
+  }
+
+  async function handleAssign() {
+    if (!selectedUserIds.length || !selectedScriptIds.length) {
+      setError("Choose at least one speaker and one script.");
+      return;
+    }
+    setError("");
+    setNotice("");
+    try {
+      await assignScripts(token, selectedUserIds, selectedScriptIds);
+      await Promise.all([refresh(), loadDataset()]);
+      setNotice("Scripts assigned.");
+    } catch (assignmentError) {
+      setError(assignmentError instanceof Error ? assignmentError.message : "Could not assign scripts.");
+    }
+  }
+
+  async function handleExportAccepted() {
+    setError("");
+    setNotice("");
+    try {
+      const blob = await exportRecordings(token, { acceptedOnly: true, bestTakeOnly: true });
+      downloadBlob(blob, "accepted-best-takes-manifest.jsonl");
+      setNotice("Accepted best-take manifest exported.");
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "Could not export manifest.");
+    }
+  }
+
+  async function handleCreateSnapshot() {
+    setError("");
+    setNotice("");
+    try {
+      const snapshot = await createDatasetSnapshot(token, {
+        name: snapshotName,
+        acceptedOnly: true,
+        bestTakeOnly: true,
+      });
+      await loadDataset();
+      setNotice(`${snapshot.name} snapshot created.`);
+    } catch (snapshotError) {
+      setError(snapshotError instanceof Error ? snapshotError.message : "Could not create snapshot.");
+    }
+  }
+
+  return (
+    <div className="workspace-section dataset-workspace">
+      <div className="section-head">
+        <h1>Dataset</h1>
+        <div className="recording-bulk-actions">
+          <span className="count-chip">{loading ? "Loading" : `${acceptedRecordings.length} accepted`}</span>
+          <button className="secondary-button" type="button" onClick={() => void handleExportAccepted()}>
+            <Download size={16} /> Export Clean
+          </button>
+        </div>
+      </div>
+
+      <div className="dataset-grid">
+        <section className="dataset-panel wide">
+          <PanelHead title="Speaker Progress" meta={`${speakerProgress.length} speakers`} />
+          <div className="progress-table">
+            {speakerProgress.length ? (
+              speakerProgress.map((item) => (
+                <div className="progress-row" key={item.user.id}>
+                  <div>
+                    <strong>{item.user.display_name}</strong>
+                    <span>{item.user.email}</span>
+                  </div>
+                  <MetricPill label="Assigned" value={item.assigned} />
+                  <MetricPill label="Accepted" value={item.accepted} />
+                  <MetricPill label="Redo" value={item.needs_redo} />
+                  <MetricPill label="Remaining" value={item.remaining} />
+                  <div className="consistency-stack">
+                    <span>Volume range {item.consistency.volume.range_rms.toFixed(3)}</span>
+                    <span>Speed {Math.round(item.consistency.speed.average_wpm)} wpm</span>
+                    <span>Noise {item.consistency.background_noise.average_db.toFixed(1)} dB</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <EmptyState icon={<Users size={18} />} text="No speaker progress yet." />
+            )}
+          </div>
+        </section>
+
+        <section className="dataset-panel">
+          <PanelHead title="Batch Assignment" meta={`${selectedUserIds.length} x ${selectedScriptIds.length}`} />
+          <div className="assignment-columns">
+            <Checklist title="Speakers" items={users.map((user) => ({ id: user.id, label: user.display_name }))} selected={selectedUserIds} onToggle={toggleUser} />
+            <Checklist title="Scripts" items={scripts.map((script) => ({ id: script.id, label: scriptDisplayTitle(script) }))} selected={selectedScriptIds} onToggle={toggleScript} />
+          </div>
+          <button className="primary-button full" type="button" onClick={() => void handleAssign()}>
+            <Check size={16} /> Assign Scripts
+          </button>
+        </section>
+
+        <section className="dataset-panel">
+          <PanelHead title="Coverage" meta={`${recordings.length} takes`} />
+          <CoverageMatrix coverage={coverage} />
+        </section>
+
+        <section className="dataset-panel">
+          <PanelHead title="Script Balance" meta={`${dashboard?.script_balance.script_count ?? scripts.length} scripts`} />
+          <TagCloud values={dashboard?.script_balance.tags ?? {}} />
+          <PanelHead title="Tone Labels" meta="per line" compact />
+          <TagCloud values={dashboard?.tone_counts ?? {}} />
+        </section>
+
+        <section className="dataset-panel">
+          <PanelHead
+            title="Phoneme Coverage"
+            meta={`${dashboard?.phoneme_coverage.covered_count ?? 0}/${dashboard?.phoneme_coverage.target_count ?? 0}`}
+          />
+          <div className="phoneme-list">
+            {(dashboard?.phoneme_coverage.covered ?? []).map((phoneme) => (
+              <span key={phoneme}>{phoneme}</span>
+            ))}
+          </div>
+          {dashboard?.phoneme_coverage.missing?.length ? (
+            <p className="muted">Missing: {dashboard.phoneme_coverage.missing.join(", ")}</p>
+          ) : null}
+        </section>
+
+        <section className="dataset-panel">
+          <PanelHead title="Dataset Versions" meta={`${snapshots.length} snapshots`} />
+          <div className="snapshot-row">
+            <Field label="Snapshot name" value={snapshotName} onChange={setSnapshotName} />
+            <button className="primary-button" type="button" onClick={() => void handleCreateSnapshot()}>
+              <Save size={16} /> Create
+            </button>
+          </div>
+          <div className="snapshot-list">
+            {snapshots.length ? (
+              snapshots.map((snapshot) => (
+                <div className="snapshot-item" key={snapshot.id}>
+                  <strong>{snapshot.name}</strong>
+                  <span>{snapshot.recording_count} recordings</span>
+                  <small>{formatShortDate(snapshot.created_at)}</small>
+                </div>
+              ))
+            ) : (
+              <EmptyState icon={<FileText size={18} />} text="No snapshots yet." />
+            )}
+          </div>
+        </section>
       </div>
     </div>
   );
@@ -895,6 +1265,15 @@ function ScriptRecorder({
   const [activeLineIndex, setActiveLineIndex] = useState(0);
   const [autoScroll, setAutoScroll] = useState(false);
   const [liveInputLevel, setLiveInputLevel] = useState<LiveInputLevel>(() => classifyLiveInputLevel(null));
+  const [recordingContext, setRecordingContext] = useState<RecordingContext>({
+    accent: "",
+    state: "",
+    age_group: "",
+    gender: "",
+    device: "laptop mic",
+    noise_condition: "quiet room",
+    domain: "healthcare",
+  });
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState("");
   const recorderRef = useRef<TrainingAudioRecorder | null>(null);
@@ -1193,6 +1572,9 @@ function ScriptRecorder({
     const formData = new FormData();
     formData.append("script_id", script.id);
     formData.append("audio", recording.blob, `${session.user.id}_${String(script.index).padStart(4, "0")}.wav`);
+    Object.entries(recordingContext).forEach(([key, value]) => {
+      if (value.trim()) formData.append(key, value.trim());
+    });
 
     try {
       const response = await saveRecording(formData, session.token, {
@@ -1350,6 +1732,7 @@ function ScriptRecorder({
             </article>
 
             <aside className={dockClassName}>
+              <RecordingContextPanel value={recordingContext} onChange={setRecordingContext} disabled={captureIsActive || recordingState === "saving"} />
               <div className="recorder-control-bar">
                 <div className="dock-quality">
                   <AudioLines size={22} />
@@ -1442,6 +1825,101 @@ function UploadProgress({ progress }: { progress: number }) {
       <strong>{uploadPercent}%</strong>
       <progress value={uploadPercent} max={100} aria-label="Upload progress" />
     </div>
+  );
+}
+
+function RecordingContextPanel({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: RecordingContext;
+  onChange: (value: RecordingContext) => void;
+  disabled?: boolean;
+}) {
+  function updateField(field: keyof RecordingContext, nextValue: string) {
+    onChange({ ...value, [field]: nextValue });
+  }
+
+  return (
+    <div className="recording-context-panel">
+      <div className="context-head">
+        <strong>Recording Context</strong>
+        <span>Saved with each take</span>
+      </div>
+      <div className="context-grid">
+        <SelectField
+          label="Accent"
+          value={value.accent}
+          onChange={(nextValue) => updateField("accent", nextValue)}
+          disabled={disabled}
+          options={["", "Indian English", "US English", "UK English", "Australian English"]}
+        />
+        <Field label="Region" value={value.state} onChange={(nextValue) => updateField("state", nextValue)} />
+        <SelectField
+          label="Age"
+          value={value.age_group}
+          onChange={(nextValue) => updateField("age_group", nextValue)}
+          disabled={disabled}
+          options={["", "18-24", "25-34", "35-44", "45-54", "55+"]}
+        />
+        <SelectField
+          label="Gender"
+          value={value.gender}
+          onChange={(nextValue) => updateField("gender", nextValue)}
+          disabled={disabled}
+          options={["", "female", "male", "non-binary", "prefer not to say"]}
+        />
+        <SelectField
+          label="Device"
+          value={value.device}
+          onChange={(nextValue) => updateField("device", nextValue)}
+          disabled={disabled}
+          options={["headset mic", "laptop mic", "mobile mic", "studio mic"]}
+        />
+        <SelectField
+          label="Room"
+          value={value.noise_condition}
+          onChange={(nextValue) => updateField("noise_condition", nextValue)}
+          disabled={disabled}
+          options={["quiet room", "light background noise", "office noise", "street noise"]}
+        />
+        <SelectField
+          label="Domain"
+          value={value.domain}
+          onChange={(nextValue) => updateField("domain", nextValue)}
+          disabled={disabled}
+          options={["healthcare", "support", "general", "finance", "education"]}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  disabled?: boolean;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
+        {options.map((option) => (
+          <option key={option || "blank"} value={option}>
+            {option || "Not set"}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -1606,6 +2084,289 @@ function formatShortDate(value?: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function ScriptTrainingMetadata({ script, draftText }: { script: Script; draftText: string }) {
+  const localTags = buildLocalBalanceTags(draftText);
+  const tags = localTags.length ? localTags : (script.balance_tags ?? []);
+  const notes = script.pronunciation_notes ?? [];
+  const phonemes = buildLocalPhonemeCoverage(draftText);
+
+  return (
+    <div className="training-metadata">
+      <PanelHead title="Training Metadata" meta={`${phonemes.length} phonemes`} compact />
+      <TagCloud values={Object.fromEntries(tags.map((tag) => [tag, 1]))} />
+      {notes.length ? (
+        <div className="pronunciation-notes">
+          {notes.slice(0, 5).map((note) => (
+            <span key={`${note.kind}-${note.token}`}>
+              <strong>{note.token}</strong>
+              {note.kind.replace(/_/g, " ")}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <span className="muted">Pronunciation notes appear for names, medical terms, dates, numbers, and abbreviations.</span>
+      )}
+      <div className="phoneme-list compact">
+        {phonemes.slice(0, 32).map((phoneme) => (
+          <span key={phoneme}>{phoneme}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function buildLocalBalanceTags(text: string) {
+  const tags = new Set<string>();
+  const lowerText = text.toLowerCase();
+  const words = text.match(/[A-Za-z']+|\d+(?:[.,]\d+)?/g) ?? [];
+  if (/\b\d+(?:[.,]\d+)?\b/.test(text)) tags.add("number");
+  if (/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/.test(text)) tags.add("date");
+  if (/\b[A-Z]{2,}\b/.test(text)) tags.add("abbreviation");
+  if (/\?/.test(text)) tags.add("question");
+  if (/\b(?:mg|dose|medication|medicine|prescription|bp|clinic|symptom)\b/.test(lowerText)) tags.add("medical_term");
+  tags.add(words.length <= 8 ? "short_utterance" : words.length >= 24 ? "long_utterance" : "medium_utterance");
+  return Array.from(tags).sort();
+}
+
+function buildLocalPhonemeCoverage(text: string) {
+  const lowerText = text.toLowerCase();
+  const coverage = new Set<string>();
+  for (const char of lowerText) {
+    if (char >= "a" && char <= "z") coverage.add(char);
+  }
+  ["ai", "ch", "ee", "er", "ng", "oo", "ow", "sh", "th"].forEach((token) => {
+    if (lowerText.includes(token)) coverage.add(token);
+  });
+  return Array.from(coverage).sort();
+}
+
+function RecordingQualitySummary({ recording }: { recording: AdminRecording }) {
+  const quality = recording.quality;
+  if (!quality) return null;
+
+  return (
+    <div className="quality-summary">
+      <MetricPill label="Score" value={Math.round(quality.score ?? 0)} />
+      <MetricPill label="RMS" value={(quality.rms ?? 0).toFixed(3)} />
+      <MetricPill label="Speed" value={`${Math.round(quality.speed_wpm ?? 0)} wpm`} />
+      <MetricPill label="Noise" value={`${(quality.background_noise_db ?? 0).toFixed(1)} dB`} />
+      <MetricPill label="Pitch" value={`${Math.round(quality.pitch?.range_hz ?? 0)} Hz`} />
+    </div>
+  );
+}
+
+function RecordingAudioInspector({ token, recordingId }: { token: string; recordingId: string }) {
+  const waveformRef = useRef<HTMLCanvasElement | null>(null);
+  const spectrogramRef = useRef<HTMLCanvasElement | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
+
+  async function inspectAudio() {
+    setLoading(true);
+    setError("");
+    try {
+      const blob = await fetchRecordingAudio(token, recordingId);
+      const arrayBuffer = await blob.arrayBuffer();
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      const audioContext = new AudioContextClass();
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+      drawWaveform(waveformRef.current, audioBuffer);
+      drawSpectrogram(spectrogramRef.current, audioBuffer);
+      await audioContext.close();
+      setLoaded(true);
+    } catch (inspectionError) {
+      setError(inspectionError instanceof Error ? inspectionError.message : "Could not inspect audio.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="audio-inspector">
+      <div className="inspector-head">
+        <span>{loaded ? "Waveform and spectrogram" : "Audio inspection"}</span>
+        <button className="text-button" type="button" onClick={() => void inspectAudio()} disabled={loading || !recordingId}>
+          {loading ? "Loading" : loaded ? "Refresh" : "Inspect"}
+        </button>
+      </div>
+      <div className="audio-canvases">
+        <canvas ref={waveformRef} width={560} height={96} aria-label="Waveform preview" />
+        <canvas ref={spectrogramRef} width={560} height={120} aria-label="Spectrogram preview" />
+      </div>
+      {error ? <span className="player-error">{error}</span> : null}
+    </div>
+  );
+}
+
+declare global {
+  interface Window {
+    webkitAudioContext?: typeof AudioContext;
+  }
+}
+
+function drawWaveform(canvas: HTMLCanvasElement | null, audioBuffer: AudioBuffer) {
+  if (!canvas) return;
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  const samples = audioBuffer.getChannelData(0);
+  const { width, height } = canvas;
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = "#fffbfa";
+  context.fillRect(0, 0, width, height);
+  context.strokeStyle = "#3a0975";
+  context.lineWidth = 1.5;
+  context.beginPath();
+  const step = Math.max(Math.floor(samples.length / width), 1);
+  for (let x = 0; x < width; x += 1) {
+    let min = 1;
+    let max = -1;
+    for (let index = x * step; index < Math.min((x + 1) * step, samples.length); index += 1) {
+      min = Math.min(min, samples[index]);
+      max = Math.max(max, samples[index]);
+    }
+    context.moveTo(x, ((1 - max) * height) / 2);
+    context.lineTo(x, ((1 - min) * height) / 2);
+  }
+  context.stroke();
+}
+
+function drawSpectrogram(canvas: HTMLCanvasElement | null, audioBuffer: AudioBuffer) {
+  if (!canvas) return;
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  const samples = audioBuffer.getChannelData(0);
+  const { width, height } = canvas;
+  const frameSize = 512;
+  const usableSamples = Math.min(samples.length, audioBuffer.sampleRate * 10);
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = "#13102d";
+  context.fillRect(0, 0, width, height);
+  for (let x = 0; x < width; x += 1) {
+    const start = Math.floor((x / width) * Math.max(usableSamples - frameSize, 1));
+    for (let band = 0; band < 24; band += 1) {
+      let real = 0;
+      let imaginary = 0;
+      const frequencyBin = band + 1;
+      for (let n = 0; n < frameSize; n += 8) {
+        const sample = samples[start + n] ?? 0;
+        const angle = (2 * Math.PI * frequencyBin * n) / frameSize;
+        real += sample * Math.cos(angle);
+        imaginary -= sample * Math.sin(angle);
+      }
+      const magnitude = Math.min(Math.sqrt(real * real + imaginary * imaginary) / 12, 1);
+      const y = height - ((band + 1) / 24) * height;
+      context.fillStyle = `rgba(${Math.round(255 * magnitude)}, ${Math.round(142 + 80 * magnitude)}, ${Math.round(139 - 40 * magnitude)}, ${0.18 + magnitude * 0.72})`;
+      context.fillRect(x, y, 1, Math.ceil(height / 24) + 1);
+    }
+  }
+}
+
+function PanelHead({ title, meta, compact = false }: { title: string; meta: string; compact?: boolean }) {
+  return (
+    <div className={compact ? "panel-head compact" : "panel-head"}>
+      <strong>{title}</strong>
+      <span>{meta}</span>
+    </div>
+  );
+}
+
+function MetricPill({ label, value }: { label: string; value: string | number }) {
+  return (
+    <span className="metric-pill">
+      <strong>{value}</strong>
+      {label}
+    </span>
+  );
+}
+
+function Checklist({
+  title,
+  items,
+  selected,
+  onToggle,
+}: {
+  title: string;
+  items: Array<{ id: string; label: string }>;
+  selected: string[];
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <div className="checklist">
+      <strong>{title}</strong>
+      <div>
+        {items.length ? (
+          items.map((item) => (
+            <label key={item.id}>
+              <input type="checkbox" checked={selected.includes(item.id)} onChange={() => onToggle(item.id)} />
+              <span>{item.label}</span>
+            </label>
+          ))
+        ) : (
+          <span className="muted">None yet</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CoverageMatrix({ coverage }: { coverage: DatasetDashboard["coverage"] }) {
+  const entries = Object.entries(coverage);
+  if (!entries.length) {
+    return <EmptyState icon={<BarChart3 size={18} />} text="No coverage data yet." />;
+  }
+
+  return (
+    <div className="coverage-matrix">
+      {entries.map(([field, values]) => (
+        <div className="coverage-group" key={field}>
+          <strong>{formatFieldLabel(field)}</strong>
+          {Object.entries(values).map(([value, stats]) => (
+            <span key={`${field}-${value}`}>
+              {value}
+              <small>{stats.recordings} takes</small>
+            </span>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TagCloud({ values }: { values: Record<string, number> }) {
+  const entries = Object.entries(values);
+  if (!entries.length) return <span className="muted">No tags yet.</span>;
+  return (
+    <div className="tag-cloud">
+      {entries.map(([label, count]) => (
+        <span key={label}>
+          {label.replace(/_/g, " ")}
+          <strong>{count}</strong>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function formatReviewStatus(status: ReviewStatus | string) {
+  return status.replace(/_/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function formatFieldLabel(field: string) {
+  return field.replace(/_/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function AudioDetails({ recording }: { recording: AdminRecording }) {
