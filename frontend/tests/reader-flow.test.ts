@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { nextScriptIndexAfterSave } from "../lib/reader-flow";
+import {
+  buildReaderTaskProgress,
+  nextScriptIndexAfterSave,
+  redoNotificationCount,
+  shouldShowRecordingContext,
+} from "../lib/reader-flow";
 
 describe("reader flow", () => {
   it("opens the next script after a successful save", () => {
@@ -10,5 +15,41 @@ describe("reader flow", () => {
 
   it("stays on the final script after saving the last task", () => {
     expect(nextScriptIndexAfterSave(3, 4)).toBe(3);
+  });
+
+  it("hides recording context while capture is active or saving", () => {
+    expect(shouldShowRecordingContext("idle")).toBe(true);
+    expect(shouldShowRecordingContext("review")).toBe(true);
+    expect(shouldShowRecordingContext("countdown")).toBe(false);
+    expect(shouldShowRecordingContext("recording")).toBe(false);
+    expect(shouldShowRecordingContext("paused")).toBe(false);
+    expect(shouldShowRecordingContext("saving")).toBe(false);
+  });
+
+  it("summarizes reader task progress from recording review status", () => {
+    const scripts = [
+      { id: "script-1", title: "Accepted task" },
+      { id: "script-2", title: "Submitted task" },
+      { id: "script-3", title: "Redo task" },
+      { id: "script-4", title: "Pending task" },
+    ];
+    const recordings = [
+      { id: "recording-1", timestamp: "2026-06-01T09:00:00Z", script: { id: "script-1" }, review_status: "accepted" },
+      { id: "recording-2", timestamp: "2026-06-01T10:00:00Z", script: { id: "script-2" }, review_status: "pending" },
+      {
+        id: "recording-3",
+        timestamp: "2026-06-01T11:00:00Z",
+        script: { id: "script-3" },
+        review_status: "needs_redo",
+        review_note: "Please record again.",
+      },
+    ];
+
+    const progress = buildReaderTaskProgress(scripts, recordings);
+
+    expect(progress.summary).toEqual({ total: 4, completed: 2, pending: 1, redo: 1 });
+    expect(progress.tasks.map((task) => task.status)).toEqual(["accepted", "submitted", "redo", "pending"]);
+    expect(progress.tasks[2].reviewNote).toBe("Please record again.");
+    expect(redoNotificationCount(progress.tasks)).toBe(1);
   });
 });

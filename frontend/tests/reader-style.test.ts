@@ -108,4 +108,20 @@ describe("reader presentation styles", () => {
     expect(css).toContain(".upload-progress");
     expect(css).toContain(".upload-error");
   });
+
+  it("shows admin rejection controls and reader task notifications", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("Reject");
+    expect(component).toContain("Rejected by reviewer.");
+    expect(component).toContain("TaskProgressPanel");
+    expect(component).toContain("NotificationBell");
+    expect(component).toContain("Redo requested");
+    expect(component).toContain("Completed");
+    expect(component).toContain("Pending");
+    expect(css).toContain(".task-progress-panel");
+    expect(css).toContain(".notification-button");
+    expect(css).toContain(".redo-alert");
+  });
 });

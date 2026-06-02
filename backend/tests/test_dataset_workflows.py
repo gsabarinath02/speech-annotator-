@@ -193,3 +193,68 @@ def test_admin_bulk_review_updates_selected_recordings(tmp_path, monkeypatch) ->
     statuses = {recording["id"]: recording["review_status"] for recording in recordings}
     assert statuses[first["id"]] == "needs_redo"
     assert statuses[second["id"]] == "needs_redo"
+
+
+def test_user_can_see_own_recording_reviews_and_redo_requests(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("ADMIN_PASSWORD", "AdminPass123!")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    app = create_app(upload_dir=tmp_path)
+    client = TestClient(app)
+
+    admin_token = client.post(
+        "/api/auth/login",
+        json={"email": "admin@example.com", "password": "AdminPass123!"},
+    ).json()["token"]
+    client.post(
+        "/api/admin/users",
+        headers=auth(admin_token),
+        json={"email": "redo-reader@example.com", "password": "VoicePass123!", "display_name": "Redo Reader"},
+    )
+    client.post(
+        "/api/admin/users",
+        headers=auth(admin_token),
+        json={"email": "other-reader@example.com", "password": "VoicePass123!", "display_name": "Other Reader"},
+    )
+    user_token = client.post(
+        "/api/auth/login",
+        json={"email": "redo-reader@example.com", "password": "VoicePass123!"},
+    ).json()["token"]
+    other_token = client.post(
+        "/api/auth/login",
+        json={"email": "other-reader@example.com", "password": "VoicePass123!"},
+    ).json()["token"]
+    script = client.post(
+        "/api/admin/scripts",
+        headers=auth(admin_token),
+        json={"title": "Redo script", "text": "Please record this again if needed."},
+    ).json()
+
+    recording = client.post(
+        "/api/recordings",
+        headers=auth(user_token),
+        data={"script_id": script["id"]},
+        files={"audio": ("redo.wav", make_wav(), "audio/wav")},
+    ).json()
+    client.post(
+        "/api/recordings",
+        headers=auth(other_token),
+        data={"script_id": script["id"]},
+        files={"audio": ("other.wav", make_wav(), "audio/wav")},
+    )
+
+    client.post(
+        f"/api/admin/recordings/{recording['id']}/review",
+        headers=auth(admin_token),
+        json={"status": "needs_redo", "note": "Please record this one more time."},
+    )
+
+    own_recordings = client.get("/api/recordings/my", headers=auth(user_token))
+    assert own_recordings.status_code == 200
+    payload = own_recordings.json()
+    assert payload["count"] == 1
+    assert payload["redo_count"] == 1
+    assert payload["recordings"][0]["id"] == recording["id"]
+    assert payload["recordings"][0]["review_status"] == "needs_redo"
+    assert payload["recordings"][0]["review_note"] == "Please record this one more time."
+    assert payload["recordings"][0]["script"]["id"] == script["id"]

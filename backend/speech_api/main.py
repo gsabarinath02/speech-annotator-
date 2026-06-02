@@ -535,6 +535,19 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         recordings = collect_recordings()
         return {"count": len(recordings), "recordings": recordings}
 
+    @app.get("/api/recordings/my")
+    def list_my_recordings(current_user: dict[str, Any] = Depends(require_user)) -> dict[str, object]:
+        user_id = str(current_user.get("id", ""))
+        recordings = [
+            recording
+            for recording in collect_recordings()
+            if str(recording.get("user_id") or recording.get("user", {}).get("id", "")) == user_id
+        ]
+        redo_count = sum(
+            1 for recording in recordings if recording.get("review_status", "pending") in {"needs_redo", "rejected"}
+        )
+        return {"count": len(recordings), "redo_count": redo_count, "recordings": recordings}
+
     @app.get("/api/admin/recordings/{recording_id}/audio")
     def recording_audio(recording_id: str, _admin: dict[str, Any] = Depends(require_admin)) -> FileResponse:
         recording = find_recording(recording_id)

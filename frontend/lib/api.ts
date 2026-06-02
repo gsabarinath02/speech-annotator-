@@ -126,6 +126,12 @@ export type AdminRecording = {
   reviewed_at?: string;
 };
 
+export type UserRecordingsResponse = {
+  count: number;
+  redo_count: number;
+  recordings: AdminRecording[];
+};
+
 export type ScriptAssignment = {
   id: string;
   user_id: string;
@@ -346,6 +352,14 @@ export async function fetchAdminRecordings(token: string): Promise<AdminRecordin
   });
   const payload = await readJsonOrThrow<{ recordings: AdminRecording[] }>(response, "Could not load recordings.");
   return payload.recordings;
+}
+
+export async function fetchMyRecordings(token: string): Promise<UserRecordingsResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/recordings/my`, {
+    cache: "no-store",
+    headers: authHeaders(token),
+  });
+  return readJsonOrThrow<UserRecordingsResponse>(response, "Could not load your recordings.");
 }
 
 export async function fetchRecordingAudio(token: string, recordingId: string): Promise<Blob> {

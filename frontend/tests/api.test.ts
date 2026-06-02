@@ -12,6 +12,7 @@ import {
   exportRecordings,
   fetchDatasetDashboard,
   fetchMe,
+  fetchMyRecordings,
   fetchRecordingAudio,
   fetchScripts,
   login,
@@ -411,6 +412,25 @@ describe("speech studio API helpers", () => {
         method: "POST",
         body: JSON.stringify({ name: "asr-healthcare-v1", recording_ids: ["recording-1"] }),
       }),
+    );
+  });
+
+  it("loads the signed-in user's own recording review statuses", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      await jsonResponse({
+        count: 1,
+        redo_count: 1,
+        recordings: [{ id: "recording-1", review_status: "needs_redo", review_note: "Please record again." }],
+      }),
+    );
+
+    const result = await fetchMyRecordings("session-token");
+
+    expect(result.redo_count).toBe(1);
+    expect(result.recordings[0].review_status).toBe("needs_redo");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/recordings/my",
+      { cache: "no-store", headers: { Authorization: "Bearer session-token" } },
     );
   });
 });

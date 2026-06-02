@@ -5,6 +5,7 @@ import {
   ArrowRight,
   AudioLines,
   BarChart3,
+  Bell,
   BookOpen,
   Check,
   ChevronLeft,
@@ -53,6 +54,7 @@ import {
   fetchDatasetDashboard,
   fetchDatasetSnapshots,
   fetchMe,
+  fetchMyRecordings,
   fetchRecordingAudio,
   fetchScripts,
   login,
@@ -66,7 +68,13 @@ import {
 import { MicrophoneLevelMonitor } from "../lib/audio/meter";
 import { analyzeRecordingQuality, classifyLiveInputLevel, LiveInputLevel } from "../lib/audio/quality";
 import { TrainingAudioRecorder, TrainingRecording } from "../lib/audio/recorder";
-import { nextScriptIndexAfterSave } from "../lib/reader-flow";
+import {
+  buildReaderTaskProgress,
+  nextScriptIndexAfterSave,
+  redoNotificationCount,
+  shouldShowRecordingContext,
+} from "../lib/reader-flow";
+import type { ReaderTaskProgress, ReaderTaskProgressItem } from "../lib/reader-flow";
 
 type AdminTab = "users" | "scripts" | "recordings" | "dataset";
 type ToneSegment = { tone: string; tone_key: string; text: string };
@@ -159,6 +167,7 @@ export function SpeechStudio() {
   const [scripts, setScripts] = useState<Script[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [recordings, setRecordings] = useState<AdminRecording[]>([]);
+  const [myRecordings, setMyRecordings] = useState<AdminRecording[]>([]);
   const [instructionsAcknowledged, setInstructionsAcknowledged] = useState(false);
   const [instructionsOpen, setInstructionsOpen] = useState(false);
 
@@ -167,6 +176,7 @@ export function SpeechStudio() {
     setScripts([]);
     setUsers([]);
     setRecordings([]);
+    setMyRecordings([]);
     setInstructionsAcknowledged(false);
     setInstructionsOpen(false);
   }, []);
@@ -181,15 +191,25 @@ export function SpeechStudio() {
     if (!activeSession) return;
     setError("");
     try {
-      setScripts(await fetchScripts(activeSession.token));
-
       if (activeSession.user.role === "admin") {
-        const [adminUsers, adminRecordings] = await Promise.all([
+        const [scriptList, adminUsers, adminRecordings] = await Promise.all([
+          fetchScripts(activeSession.token),
           fetchAdminUsers(activeSession.token),
           fetchAdminRecordings(activeSession.token),
         ]);
+        setScripts(scriptList);
         setUsers(adminUsers);
         setRecordings(adminRecordings);
+        setMyRecordings([]);
+      } else {
+        const [scriptList, ownRecordings] = await Promise.all([
+          fetchScripts(activeSession.token),
+          fetchMyRecordings(activeSession.token),
+        ]);
+        setScripts(scriptList);
+        setUsers([]);
+        setRecordings([]);
+        setMyRecordings(ownRecordings.recordings);
       }
     } catch (workspaceError) {
       if (workspaceError instanceof ApiError && workspaceError.status === 401) {
@@ -271,11 +291,15 @@ export function SpeechStudio() {
   }
 
   const showReadingInstructions = session.user.role !== "admin" && (!instructionsAcknowledged || instructionsOpen);
+  const readerTaskProgress = session.user.role !== "admin" ? buildReaderTaskProgress(scripts, myRecordings) : null;
 
   return (
     <main className="studio-shell">
       <header className="topbar">
         <BrandIdentity />
+        {readerTaskProgress ? (
+          <NotificationBell count={redoNotificationCount(readerTaskProgress.tasks)} tasks={readerTaskProgress.tasks} />
+        ) : null}
         <div className="session-label">
           <span>{session.user.display_name}</span>
           <strong>{session.user.role}</strong>
@@ -302,6 +326,7 @@ export function SpeechStudio() {
         <ScriptRecorder
           session={session}
           scripts={scripts}
+          myRecordings={myRecordings}
           refresh={() => refreshWorkspace(session)}
           setError={setError}
           setNotice={setNotice}
@@ -943,6 +968,9 @@ function AdminRecordings({
           <button className="secondary-button" type="button" onClick={() => void handleBulkReview("needs_redo")} disabled={!selectedCount || bulkBusy}>
             <RotateCcw size={16} /> Redo
           </button>
+          <button className="secondary-button" type="button" onClick={() => void handleBulkReview("rejected")} disabled={!selectedCount || bulkBusy}>
+            <X size={16} /> Reject
+          </button>
           <button className="secondary-button" type="button" onClick={() => void handleExportSelected()} disabled={!selectedCount}>
             <Download size={16} /> Export
           </button>
@@ -999,6 +1027,14 @@ function AdminRecordings({
                   disabled={recording.review_status === "needs_redo"}
                 >
                   <RotateCcw size={16} /> Redo
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => void handleReview(recording.id, "rejected", "Rejected by reviewer.")}
+                  disabled={recording.review_status === "rejected"}
+                >
+                  <X size={16} /> Reject
                 </button>
               </div>
             </div>
@@ -1242,6 +1278,7 @@ function AdminDataset({
 function ScriptRecorder({
   session,
   scripts,
+  myRecordings,
   refresh,
   setError,
   setNotice,
@@ -1249,6 +1286,7 @@ function ScriptRecorder({
 }: {
   session: Session;
   scripts: Script[];
+  myRecordings: AdminRecording[];
   refresh: () => Promise<void> | void;
   setError: (value: string) => void;
   setNotice: (value: string) => void;
@@ -1287,6 +1325,8 @@ function ScriptRecorder({
   const safeScriptIndex = Math.min(scriptIndex, Math.max(scripts.length - 1, 0));
   const script = scripts[safeScriptIndex];
   const segments = script ? getScriptSegments(script) : [];
+  const taskProgress = buildReaderTaskProgress(scripts, myRecordings);
+  const currentTask = script ? taskProgress.tasks.find((task) => task.scriptId === script.id) : undefined;
   const progress = Math.round(((safeScriptIndex + 1) / Math.max(scripts.length, 1)) * 100);
   const estimatedReadSeconds = estimateReadSeconds(segments);
   const qualityWarnings = recording ? analyzeRecordingQuality(recording) : [];
@@ -1732,7 +1772,16 @@ function ScriptRecorder({
             </article>
 
             <aside className={dockClassName}>
-              <RecordingContextPanel value={recordingContext} onChange={setRecordingContext} disabled={captureIsActive || recordingState === "saving"} />
+              <TaskProgressPanel progress={taskProgress} currentScriptId={script.id} />
+              {currentTask?.status === "redo" ? (
+                <div className="redo-alert" role="status">
+                  <strong>Redo requested</strong>
+                  <span>{currentTask.reviewNote || "Please record this task again."}</span>
+                </div>
+              ) : null}
+              {shouldShowRecordingContext(recordingState) ? (
+                <RecordingContextPanel value={recordingContext} onChange={setRecordingContext} />
+              ) : null}
               <div className="recorder-control-bar">
                 <div className="dock-quality">
                   <AudioLines size={22} />
@@ -1826,6 +1875,82 @@ function UploadProgress({ progress }: { progress: number }) {
       <progress value={uploadPercent} max={100} aria-label="Upload progress" />
     </div>
   );
+}
+
+function NotificationBell({ count, tasks }: { count: number; tasks: ReaderTaskProgressItem[] }) {
+  const [open, setOpen] = useState(false);
+  const redoTasks = tasks.filter((task) => task.status === "redo");
+
+  return (
+    <div className="notification-wrap">
+      <button
+        className={count ? "notification-button active" : "notification-button"}
+        type="button"
+        onClick={() => setOpen((isOpen) => !isOpen)}
+        aria-label={count ? `${count} redo notifications` : "No redo notifications"}
+        aria-expanded={open}
+      >
+        <Bell size={14} />
+        {count ? <span>{count}</span> : null}
+      </button>
+      {open ? (
+        <div className="notification-popover" role="status">
+          <strong>{count ? "Redo requested" : "No redo requests"}</strong>
+          {redoTasks.length ? (
+            redoTasks.slice(0, 4).map((task) => (
+              <p key={task.scriptId}>
+                <span>{task.title}</span>
+                <small>{task.reviewNote || "Please record this task again."}</small>
+              </p>
+            ))
+          ) : (
+            <p>
+              <span>Everything submitted is clear.</span>
+              <small>New redo requests will appear here.</small>
+            </p>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TaskProgressPanel({ progress, currentScriptId }: { progress: ReaderTaskProgress; currentScriptId: string }) {
+  if (!progress.tasks.length) return null;
+
+  return (
+    <details className="task-progress-panel">
+      <summary>
+        <span>Tasks</span>
+        <strong>
+          Completed {progress.summary.completed}/{progress.summary.total}
+        </strong>
+        <small>{progress.summary.redo ? `${progress.summary.redo} redo` : `${progress.summary.pending} pending`}</small>
+      </summary>
+      <div className="task-progress-list">
+        {progress.tasks.map((task, index) => (
+          <div
+            className={`task-progress-row ${task.status} ${task.scriptId === currentScriptId ? "current" : ""}`}
+            key={task.scriptId}
+          >
+            <span>{index + 1}</span>
+            <p>
+              <strong>{task.title}</strong>
+              {task.reviewNote ? <small>{task.reviewNote}</small> : null}
+            </p>
+            <em>{readerTaskStatusLabel(task.status)}</em>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function readerTaskStatusLabel(status: ReaderTaskProgressItem["status"]) {
+  if (status === "accepted") return "Accepted";
+  if (status === "submitted") return "Completed";
+  if (status === "redo") return "Redo";
+  return "Pending";
 }
 
 function RecordingContextPanel({
