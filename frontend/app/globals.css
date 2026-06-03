@@ -582,9 +582,14 @@ p {
 }
 
 .speaker-chip {
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
   color: var(--speaker-ink, var(--body));
   background: var(--speaker-bg, var(--surface));
   border: 1px solid var(--speaker-border, var(--line));
+  box-shadow: 0 8px 18px rgba(19, 16, 45, 0.06);
 }
 
 .tone-chip[data-tooltip],
@@ -616,6 +621,12 @@ p {
 .tone-chip-icon svg,
 .speaker-chip-icon svg {
   display: block;
+}
+
+.speaker-chip .speaker-chip-icon {
+  width: 1.2rem;
+  height: 1.2rem;
+  margin-right: 0;
 }
 
 .tone-chip[data-tooltip]::before,
@@ -729,15 +740,15 @@ p {
   --tone-bg: rgba(19, 16, 45, 0.035);
   --tone-border: rgba(19, 16, 45, 0.08);
   --tone-ink: #686473;
-  --speaker-bg: rgba(19, 16, 45, 0.035);
-  --speaker-border: rgba(19, 16, 45, 0.08);
-  --speaker-ink: #686473;
+  --speaker-bg: #f5f3f8;
+  --speaker-border: rgba(19, 16, 45, 0.13);
+  --speaker-ink: #5f5a6e;
 }
 
 .speaker-navigator {
-  --speaker-bg: #fff;
-  --speaker-border: rgba(19, 16, 45, 0.14);
-  --speaker-ink: var(--ink);
+  --speaker-bg: #f1ecff;
+  --speaker-border: rgba(110, 69, 255, 0.28);
+  --speaker-ink: #3a0975;
 }
 
 .script-editor-meta {
@@ -1962,7 +1973,7 @@ p {
   display: grid;
   gap: clamp(1rem, 2.35vh, 1.7rem);
   color: var(--ink);
-  max-width: 52rem;
+  max-width: 64rem;
   min-height: 100%;
   margin: 0 auto;
   padding: clamp(3.2rem, 10vh, 5.5rem) 1.25rem clamp(5rem, 13vh, 7rem);
@@ -1973,9 +1984,12 @@ p {
 
 .tone-line {
   position: relative;
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 9.8rem) var(--line-marker-width, 3px) minmax(0, 1fr);
+  column-gap: 0.85rem;
+  align-items: start;
   min-width: 0;
-  padding: 0.4rem 0 0.4rem 1rem;
+  padding: 0.4rem 0;
   border-radius: 8px;
   color: var(--ink);
   opacity: var(--line-opacity, 1);
@@ -1988,11 +2002,11 @@ p {
 }
 
 .tone-line::before {
-  position: absolute;
-  top: 0.5rem;
-  bottom: 0.5rem;
-  left: -0.15rem;
+  grid-column: 2;
+  align-self: stretch;
   width: var(--line-marker-width, 3px);
+  min-height: 1.9rem;
+  margin-block: 0.1rem;
   background: var(--tone-color, transparent);
   border-radius: 999px;
   opacity: var(--line-marker-opacity, 1);
@@ -2004,12 +2018,10 @@ p {
 }
 
 .tone-line .tone-chip-group {
-  position: absolute;
-  top: 0.55rem;
-  left: -12.2rem;
+  grid-column: 1;
   justify-content: flex-end;
-  width: 11.4rem;
-  max-width: 11.4rem;
+  width: 9.8rem;
+  max-width: 9.8rem;
   font-size: 0.63rem;
   opacity: var(--line-chip-opacity, 1);
   transition:
@@ -2029,6 +2041,7 @@ p {
 }
 
 .tone-line > span:last-child {
+  grid-column: 3;
   display: block;
   min-width: 0;
   color: var(--ink);
@@ -2593,6 +2606,11 @@ progress::-webkit-progress-value {
     font-size: 1.1rem;
   }
 
+  .tone-line {
+    display: block;
+    padding: 0.4rem 0 0.4rem 1rem;
+  }
+
   .teleprompter-frame {
     padding-bottom: 13rem;
   }
@@ -2602,7 +2620,12 @@ progress::-webkit-progress-value {
   }
 
   .tone-line::before {
+    position: absolute;
+    top: 0.5rem;
+    bottom: 0.5rem;
     left: -0.8rem;
+    min-height: 0;
+    margin-block: 0;
   }
 
   .tone-line .tone-chip-group {

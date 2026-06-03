@@ -108,11 +108,41 @@ describe("reader presentation styles", () => {
     expect(component).toContain("getSpeakerTooltip(segment.speaker_key)");
     expect(component).toContain("Don't need to read this.");
     expect(component).toContain("speaker-chip-icon");
-    expect(component).toContain("speaker-chip-label");
+    expect(component).not.toContain("speaker-chip-label");
     expect(css).toContain(".tone-chip-group");
     expect(css).toContain(".speaker-chip");
     expect(css).toContain(".speaker-chip-icon");
+    expect(css).toContain(".speaker-navigator");
     expect(css).toMatch(/\.speaker-chip\[data-tooltip\]:is\(:hover, :focus-visible\)::after/);
+  });
+
+  it("uses large color-coded icon-only speaker bubbles", () => {
+    const speakerChipStyles = readRuleBodies(".speaker-chip").find((body) => body.includes("height: 2.35rem")) ?? "";
+    const speakerIconStyles = readRuleBody(".speaker-chip .speaker-chip-icon");
+    const userSpeakerStyles = readRuleBody(".speaker-user");
+    const navigatorSpeakerStyles = readRuleBody(".speaker-navigator");
+
+    expect(speakerChipStyles).toMatch(/width\s*:\s*2\.[0-9]+rem/);
+    expect(speakerChipStyles).toMatch(/height\s*:\s*2\.[0-9]+rem/);
+    expect(speakerChipStyles).toMatch(/justify-content\s*:\s*center/);
+    expect(speakerIconStyles).toMatch(/margin-right\s*:\s*0/);
+    expect(userSpeakerStyles).toMatch(/--speaker-bg\s*:/);
+    expect(userSpeakerStyles).toMatch(/--speaker-ink\s*:/);
+    expect(navigatorSpeakerStyles).toMatch(/--speaker-bg\s*:/);
+    expect(navigatorSpeakerStyles).toMatch(/--speaker-ink\s*:/);
+    expect(userSpeakerStyles).not.toEqual(navigatorSpeakerStyles);
+  });
+
+  it("keeps speaker and emotion bubbles inside the readable column", () => {
+    const lineStyles = readRuleBody(".tone-line");
+    const chipGroupStyles = readRuleBody(".tone-line .tone-chip-group");
+    const markerStyles = readRuleBody(".tone-line::before");
+
+    expect(lineStyles).toMatch(/grid-template-columns\s*:/);
+    expect(chipGroupStyles).toMatch(/grid-column\s*:\s*1/);
+    expect(markerStyles).toMatch(/grid-column\s*:\s*2/);
+    expect(chipGroupStyles).not.toMatch(/left\s*:\s*-/);
+    expect(chipGroupStyles).not.toMatch(/position\s*:\s*absolute/);
   });
 
   it("makes countdown and pause/resume controls prominent during recording", () => {

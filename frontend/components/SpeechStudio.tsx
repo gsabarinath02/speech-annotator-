@@ -2443,7 +2443,6 @@ function ToneChip({ segment }: { segment: ToneSegment }) {
               {speakerIcon}
             </span>
           ) : null}
-          <span className="speaker-chip-label">{speakerLabel}</span>
         </button>
       ) : null}
       <button
@@ -2465,8 +2464,8 @@ function ToneChip({ segment }: { segment: ToneSegment }) {
 }
 
 function getToneIcon(toneKey?: string) {
-  if (toneKey === "user") return <UserRound size={12} strokeWidth={2.2} />;
-  if (toneKey === "navigator") return <Headset size={12} strokeWidth={2.2} />;
+  if (toneKey === "user") return <UserRound size={16} strokeWidth={2.25} />;
+  if (toneKey === "navigator") return <Headset size={16} strokeWidth={2.25} />;
   return null;
 }
 
