@@ -35,7 +35,7 @@ export type Script = {
   title: string;
   text: string;
   line_count: number;
-  tone_segments?: Array<{ tone: string; tone_key: string; text: string }>;
+  tone_segments?: Array<{ tone: string; tone_key: string; speaker?: string; speaker_key?: string; text: string }>;
   tones?: string[];
   balance_tags?: string[];
   pronunciation_notes?: Array<{ kind: string; token: string; note: string }>;

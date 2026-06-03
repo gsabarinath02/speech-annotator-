@@ -79,11 +79,15 @@ describe("reader presentation styles", () => {
     const css = readFileSync(cssPath, "utf8");
 
     expect(css).toContain(".tone-user");
+    expect(css).toContain(".speaker-user");
     const userToneStyles = readRuleBodies(".tone-user").join("\n");
-    const userLineStyles = readRuleBody(".tone-line.tone-user > span:last-child");
+    const speakerUserStyles = readRuleBodies(".speaker-user").join("\n");
+    const userLineStyles = readRuleBodies(".tone-line.speaker-user > span:last-child").join("\n");
 
     expect(userToneStyles).toMatch(/--tone-bg\s*:/);
     expect(userToneStyles).toMatch(/--tone-ink\s*:/);
+    expect(speakerUserStyles).toMatch(/--tone-bg\s*:/);
+    expect(speakerUserStyles).toMatch(/--tone-ink\s*:/);
     expect(userLineStyles).toMatch(/background\s*:/);
     expect(userLineStyles).toMatch(/color\s*:/);
   });
@@ -94,7 +98,9 @@ describe("reader presentation styles", () => {
 
     expect(component).toContain("UserRound");
     expect(component).toContain("Navigation");
-    expect(component).toContain("getToneIcon(segment.tone_key)");
+    expect(component).toContain("speaker_key");
+    expect(component).toContain("getToneIcon(segment.speaker_key || segment.tone_key)");
+    expect(component).toContain("speaker-${segment.speaker_key}");
     expect(component).toContain("tone-chip-icon");
     expect(css).toContain(".tone-chip-icon");
   });

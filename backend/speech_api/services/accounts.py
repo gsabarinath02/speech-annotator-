@@ -24,7 +24,7 @@ TOKEN_TTL_SECONDS = 12 * 60 * 60
 PASSWORD_RESET_TTL_SECONDS = 30 * 60
 PASSWORD_ITERATIONS = 210_000
 MIN_PASSWORD_LENGTH = 12
-EXAMPLE_SEED_VERSION = "2026-06-03-outcomes-tone-examples-v4"
+EXAMPLE_SEED_VERSION = "2026-06-03-outcomes-tone-examples-v6"
 TONE_TAG_PATTERN = re.compile(r"^\s*(?:\*\*)?\[([A-Za-z][A-Za-z\s-]*)\](?:\*\*)?\s*")
 
 
@@ -76,8 +76,13 @@ def script_line_count(text: str) -> int:
 
 
 def title_from_text(text: str) -> str:
-    text_without_tone = TONE_TAG_PATTERN.sub("", text.strip().replace("\u00a0", " "))
-    words = text_without_tone.strip().split()
+    text_without_tags = text.strip().replace("\u00a0", " ")
+    while True:
+        match = TONE_TAG_PATTERN.match(text_without_tags)
+        if not match:
+            break
+        text_without_tags = text_without_tags[match.end():].strip()
+    words = text_without_tags.strip().split()
     return " ".join(words[:7]).rstrip(".,;:!?") or "Untitled script"
 
 
@@ -99,7 +104,15 @@ def parse_tone_segments(text: str) -> list[dict[str, str]]:
             tone = match.group(1).strip().lower()
             line = line[match.end():].strip()
         if line:
-            segments.append({"tone": tone, "tone_key": tone_key(tone), "text": line})
+            segment = {"tone": tone, "tone_key": tone_key(tone), "text": line}
+            speaker_match = TONE_TAG_PATTERN.match(line)
+            if speaker_match:
+                speaker = speaker_match.group(1).strip().lower()
+                segment["speaker"] = speaker
+                segment["speaker_key"] = tone_key(speaker)
+                segment["text"] = line[speaker_match.end():].strip()
+            if segment["text"]:
+                segments.append(segment)
     if not segments and text.strip():
         segments.append({"tone": "neutral", "tone_key": "neutral", "text": text.strip()})
     return segments

@@ -692,6 +692,13 @@ p {
   --tone-ink: #686473;
 }
 
+.speaker-user {
+  --tone-color: #b8b5c7;
+  --tone-bg: rgba(19, 16, 45, 0.035);
+  --tone-border: rgba(19, 16, 45, 0.08);
+  --tone-ink: #686473;
+}
+
 .script-editor-meta {
   display: grid;
   gap: 0.25rem;
@@ -1988,7 +1995,8 @@ p {
   transition: font-weight 180ms ease;
 }
 
-.tone-line.tone-user > span:last-child {
+.tone-line.tone-user > span:last-child,
+.tone-line.speaker-user > span:last-child {
   width: fit-content;
   max-width: 100%;
   padding: 0.18rem 0.5rem;

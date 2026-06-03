@@ -83,7 +83,7 @@ import {
 import type { ReaderTaskProgressItem } from "../lib/reader-flow";
 
 type AdminTab = "users" | "scripts" | "recordings" | "dataset";
-type ToneSegment = { tone: string; tone_key: string; text: string };
+type ToneSegment = { tone: string; tone_key: string; speaker?: string; speaker_key?: string; text: string };
 type RecordingContext = {
   accent: string;
   state: string;
@@ -1947,6 +1947,7 @@ function ScriptRecorder({
                       const distance = Math.max(-5, Math.min(5, index - activeLineIndex));
                       const absoluteDistance = Math.abs(distance);
                       const isActiveLine = index === activeLineIndex;
+                      const speakerClass = segment.speaker_key ? `speaker-${segment.speaker_key}` : "";
                       const lineStyle = {
                         "--line-chip-opacity": `${isActiveLine ? 1 : Math.max(0.66, 0.9 - absoluteDistance * 0.05)}`,
                         "--line-marker-opacity": `${isActiveLine ? 0.96 : Math.max(0.44, 0.72 - absoluteDistance * 0.055)}`,
@@ -1955,7 +1956,7 @@ function ScriptRecorder({
                       } as CSSProperties;
                       return (
                         <p
-                          className={`tone-line tone-${segment.tone_key} ${index === activeLineIndex ? "is-active" : ""}`}
+                          className={`tone-line tone-${segment.tone_key} ${speakerClass} ${index === activeLineIndex ? "is-active" : ""}`}
                           key={`${script.id}-${index}`}
                           ref={(node) => {
                             lineRefs.current[index] = node;
@@ -2396,12 +2397,15 @@ function TonePreview({ segments }: { segments: ToneSegment[] }) {
   return (
     <div className="tone-preview" aria-label="Tone preview">
       {segments.length ? (
-        segments.map((segment, index) => (
-          <div className={`tone-preview-row tone-${segment.tone_key}`} key={`${segment.tone_key}-${index}`}>
-            <ToneChip segment={segment} />
-            <p>{segment.text}</p>
-          </div>
-        ))
+        segments.map((segment, index) => {
+          const speakerClass = segment.speaker_key ? `speaker-${segment.speaker_key}` : "";
+          return (
+            <div className={`tone-preview-row tone-${segment.tone_key} ${speakerClass}`} key={`${segment.tone_key}-${index}`}>
+              <ToneChip segment={segment} />
+              <p>{segment.text}</p>
+            </div>
+          );
+        })
       ) : (
         <span className="muted">Add lines like [warm] Your sentence to define tone.</span>
       )}
@@ -2411,8 +2415,9 @@ function TonePreview({ segments }: { segments: ToneSegment[] }) {
 
 function ToneChip({ segment }: { segment: ToneSegment }) {
   const toneLabel = formatToneLabel(segment.tone);
+  const speakerLabel = segment.speaker ? `${formatToneLabel(segment.speaker)} speaker. ` : "";
   const guidance = getToneGuidance(segment.tone);
-  const toneIcon = getToneIcon(segment.tone_key);
+  const toneIcon = getToneIcon(segment.speaker_key || segment.tone_key);
   const [tooltipOpen, setTooltipOpen] = useState(false);
 
   return (
@@ -2422,7 +2427,7 @@ function ToneChip({ segment }: { segment: ToneSegment }) {
       data-tooltip={guidance}
       data-tooltip-open={tooltipOpen ? "true" : undefined}
       title={guidance}
-      aria-label={`${toneLabel} tone guidance. ${guidance}`}
+      aria-label={`${speakerLabel}${toneLabel} tone guidance. ${guidance}`}
       onBlur={() => setTooltipOpen(false)}
       onClick={() => setTooltipOpen(true)}
       onFocus={() => setTooltipOpen(true)}
@@ -2454,8 +2459,18 @@ function parseToneSegments(text: string): ToneSegment[] {
       const cleanLine = line.replace(/\*\*/g, "").trim();
       const match = cleanLine.match(TONE_PATTERN);
       const tone = match?.[1]?.trim().toLowerCase() || "neutral";
-      const sentence = match ? cleanLine.slice(match[0].length).trim() : cleanLine;
-      return { tone, tone_key: toneKey(tone), text: sentence };
+      let sentence = match ? cleanLine.slice(match[0].length).trim() : cleanLine;
+      const speakerMatch = sentence.match(TONE_PATTERN);
+      const speaker = speakerMatch?.[1]?.trim().toLowerCase();
+      if (speakerMatch) {
+        sentence = sentence.slice(speakerMatch[0].length).trim();
+      }
+      return {
+        tone,
+        tone_key: toneKey(tone),
+        ...(speaker ? { speaker, speaker_key: toneKey(speaker) } : {}),
+        text: sentence,
+      };
     })
     .filter((segment) => segment.text);
 
