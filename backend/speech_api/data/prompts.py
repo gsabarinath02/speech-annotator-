@@ -2,6 +2,20 @@ from __future__ import annotations
 
 EXAMPLE_SCRIPTS: list[dict[str, str]] = [
     {
+        "title": "Mayo Meds to Beds - Declined Delivery",
+        "text": """[navigator] Hello John Doe. This is the Mayo Clinic Pharmacy calling on a recorded line about our Meds to Beds delivery service. Is now a good time to talk?
+[user] It is.
+[navigator] Thank you. To make sure I reached the right room, am I speaking with John Doe?
+[user] Yes. You are.
+[navigator] Great, thank you. For privacy, can you please state your date of birth, including the year?
+[user] This twelve of April nineteen fifty eight.
+[navigator] Just to confirm, that birthdate is April twelfth, nineteen fifty-eight?
+[user] Yes.
+[navigator] Thank you, John. Your care team has prescribed medications for you to take at home. For your convenience, the Mayo Clinic Pharmacy can fill your prescriptions and deliver them right to your bedside through our Meds to Beds program, which is a free service we offer at Mayo Clinic. Would you like Mayo Clinic Pharmacy to fill these through Meds to Beds and deliver them to your room? Participation is optional.
+[user] No. I'm not interested.
+[navigator] Thank you for letting me know. No delivery will be made. I will transfer you to a pharmacy team member for any further assistance. Please hold on a moment.""",
+    },
+    {
         "title": "Virtual Care - Neutral",
         "text": """[neutral] Hello, this is Maya from the Outcomes care team.
 [verification] For safety, please confirm your full date of birth, including the year.

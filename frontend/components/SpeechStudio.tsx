@@ -22,6 +22,7 @@ import {
   RotateCcw,
   Save,
   Search,
+  SlidersHorizontal,
   Square,
   Trash2,
   UserPlus,
@@ -70,11 +71,13 @@ import { analyzeRecordingQuality, classifyLiveInputLevel, LiveInputLevel } from 
 import { TrainingAudioRecorder, TrainingRecording } from "../lib/audio/recorder";
 import {
   buildReaderTaskProgress,
+  isRecordingContextComplete,
   nextScriptIndexAfterSave,
   redoNotificationCount,
+  shouldRenderRecordingContextPanel,
   shouldShowRecordingContext,
 } from "../lib/reader-flow";
-import type { ReaderTaskProgress, ReaderTaskProgressItem } from "../lib/reader-flow";
+import type { ReaderTaskProgressItem } from "../lib/reader-flow";
 
 type AdminTab = "users" | "scripts" | "recordings" | "dataset";
 type ToneSegment = { tone: string; tone_key: string; text: string };
@@ -1303,6 +1306,8 @@ function ScriptRecorder({
   const [activeLineIndex, setActiveLineIndex] = useState(0);
   const [autoScroll, setAutoScroll] = useState(false);
   const [liveInputLevel, setLiveInputLevel] = useState<LiveInputLevel>(() => classifyLiveInputLevel(null));
+  const [contextPanelOpen, setContextPanelOpen] = useState(true);
+  const [contextAutoClosed, setContextAutoClosed] = useState(false);
   const [recordingContext, setRecordingContext] = useState<RecordingContext>({
     accent: "",
     state: "",
@@ -1327,6 +1332,7 @@ function ScriptRecorder({
   const segments = script ? getScriptSegments(script) : [];
   const taskProgress = buildReaderTaskProgress(scripts, myRecordings);
   const currentTask = script ? taskProgress.tasks.find((task) => task.scriptId === script.id) : undefined;
+  const recordingContextComplete = isRecordingContextComplete(recordingContext);
   const progress = Math.round(((safeScriptIndex + 1) / Math.max(scripts.length, 1)) * 100);
   const estimatedReadSeconds = estimateReadSeconds(segments);
   const qualityWarnings = recording ? analyzeRecordingQuality(recording) : [];
@@ -1347,6 +1353,8 @@ function ScriptRecorder({
             : recording
               ? "Ready to save"
               : "Ready";
+  const contextToggleLabel = contextPanelOpen ? "Hide context" : "Show context";
+  const contextToggleTitle = recordingContextComplete ? contextToggleLabel : `${contextToggleLabel} before recording`;
 
   const updateActiveLineFromScroll = useCallback(() => {
     const scrollElement = scriptScrollRef.current;
@@ -1466,6 +1474,7 @@ function ScriptRecorder({
     setError("");
     setNotice("");
     setSaveResult(null);
+    setContextPanelOpen(false);
     setCountdown(3);
     setRecordingState("countdown");
   }, [recordingState, script, setError, setNotice]);
@@ -1607,6 +1616,7 @@ function ScriptRecorder({
     setNotice("");
     setUploadError("");
     setUploadProgress(0);
+    setContextPanelOpen(false);
     setRecordingState("saving");
 
     const formData = new FormData();
@@ -1659,6 +1669,14 @@ function ScriptRecorder({
     setScriptIndex(nextIndex);
   }
 
+  function handleRecordingContextChange(nextContext: RecordingContext) {
+    setRecordingContext(nextContext);
+    if (!contextAutoClosed && isRecordingContextComplete(nextContext)) {
+      setContextPanelOpen(false);
+      setContextAutoClosed(true);
+    }
+  }
+
   return (
     <section className="script-recorder-page">
       {!script ? (
@@ -1707,6 +1725,18 @@ function ScriptRecorder({
                     </button>
                   </div>
                   <div className="reader-meta-actions">
+                    {shouldShowRecordingContext(recordingState) ? (
+                      <button
+                        className={contextPanelOpen ? "recording-context-toggle active" : "recording-context-toggle"}
+                        type="button"
+                        onClick={() => setContextPanelOpen((isOpen) => !isOpen)}
+                        aria-label={contextToggleLabel}
+                        title={contextToggleTitle}
+                      >
+                        <SlidersHorizontal size={14} />
+                        <span>{contextToggleLabel}</span>
+                      </button>
+                    ) : null}
                     <button
                       className="reader-help-button"
                       type="button"
@@ -1772,15 +1802,18 @@ function ScriptRecorder({
             </article>
 
             <aside className={dockClassName}>
-              <TaskProgressPanel progress={taskProgress} currentScriptId={script.id} />
               {currentTask?.status === "redo" ? (
                 <div className="redo-alert" role="status">
                   <strong>Redo requested</strong>
                   <span>{currentTask.reviewNote || "Please record this task again."}</span>
                 </div>
               ) : null}
-              {shouldShowRecordingContext(recordingState) ? (
-                <RecordingContextPanel value={recordingContext} onChange={setRecordingContext} />
+              {shouldRenderRecordingContextPanel(recordingState, contextPanelOpen) ? (
+                <RecordingContextPanel
+                  value={recordingContext}
+                  onChange={handleRecordingContextChange}
+                  onClose={() => setContextPanelOpen(false)}
+                />
               ) : null}
               <div className="recorder-control-bar">
                 <div className="dock-quality">
@@ -1880,6 +1913,8 @@ function UploadProgress({ progress }: { progress: number }) {
 function NotificationBell({ count, tasks }: { count: number; tasks: ReaderTaskProgressItem[] }) {
   const [open, setOpen] = useState(false);
   const redoTasks = tasks.filter((task) => task.status === "redo");
+  const completedCount = tasks.filter((task) => task.status === "accepted" || task.status === "submitted").length;
+  const pendingCount = tasks.filter((task) => task.status === "pending").length;
 
   return (
     <div className="notification-wrap">
@@ -1895,7 +1930,17 @@ function NotificationBell({ count, tasks }: { count: number; tasks: ReaderTaskPr
       </button>
       {open ? (
         <div className="notification-popover" role="status">
-          <strong>{count ? "Redo requested" : "No redo requests"}</strong>
+          <strong>{count ? "Redo requested" : "Task status"}</strong>
+          <div className="notification-summary">
+            <span>
+              <strong>Completed</strong>
+              {completedCount}/{tasks.length}
+            </span>
+            <span>
+              <strong>Pending</strong>
+              {pendingCount}
+            </span>
+          </div>
           {redoTasks.length ? (
             redoTasks.slice(0, 4).map((task) => (
               <p key={task.scriptId}>
@@ -1915,52 +1960,14 @@ function NotificationBell({ count, tasks }: { count: number; tasks: ReaderTaskPr
   );
 }
 
-function TaskProgressPanel({ progress, currentScriptId }: { progress: ReaderTaskProgress; currentScriptId: string }) {
-  if (!progress.tasks.length) return null;
-
-  return (
-    <details className="task-progress-panel">
-      <summary>
-        <span>Tasks</span>
-        <strong>
-          Completed {progress.summary.completed}/{progress.summary.total}
-        </strong>
-        <small>{progress.summary.redo ? `${progress.summary.redo} redo` : `${progress.summary.pending} pending`}</small>
-      </summary>
-      <div className="task-progress-list">
-        {progress.tasks.map((task, index) => (
-          <div
-            className={`task-progress-row ${task.status} ${task.scriptId === currentScriptId ? "current" : ""}`}
-            key={task.scriptId}
-          >
-            <span>{index + 1}</span>
-            <p>
-              <strong>{task.title}</strong>
-              {task.reviewNote ? <small>{task.reviewNote}</small> : null}
-            </p>
-            <em>{readerTaskStatusLabel(task.status)}</em>
-          </div>
-        ))}
-      </div>
-    </details>
-  );
-}
-
-function readerTaskStatusLabel(status: ReaderTaskProgressItem["status"]) {
-  if (status === "accepted") return "Accepted";
-  if (status === "submitted") return "Completed";
-  if (status === "redo") return "Redo";
-  return "Pending";
-}
-
 function RecordingContextPanel({
   value,
   onChange,
-  disabled,
+  onClose,
 }: {
   value: RecordingContext;
   onChange: (value: RecordingContext) => void;
-  disabled?: boolean;
+  onClose: () => void;
 }) {
   function updateField(field: keyof RecordingContext, nextValue: string) {
     onChange({ ...value, [field]: nextValue });
@@ -1969,15 +1976,19 @@ function RecordingContextPanel({
   return (
     <div className="recording-context-panel">
       <div className="context-head">
-        <strong>Recording Context</strong>
-        <span>Saved with each take</span>
+        <div>
+          <strong>Recording Context</strong>
+          <span>Saved with each take</span>
+        </div>
+        <button className="context-close-button" type="button" onClick={onClose} aria-label="Hide context" title="Hide context">
+          <X size={14} />
+        </button>
       </div>
       <div className="context-grid">
         <SelectField
           label="Accent"
           value={value.accent}
           onChange={(nextValue) => updateField("accent", nextValue)}
-          disabled={disabled}
           options={["", "Indian English", "US English", "UK English", "Australian English"]}
         />
         <Field label="Region" value={value.state} onChange={(nextValue) => updateField("state", nextValue)} />
@@ -1985,35 +1996,30 @@ function RecordingContextPanel({
           label="Age"
           value={value.age_group}
           onChange={(nextValue) => updateField("age_group", nextValue)}
-          disabled={disabled}
           options={["", "18-24", "25-34", "35-44", "45-54", "55+"]}
         />
         <SelectField
           label="Gender"
           value={value.gender}
           onChange={(nextValue) => updateField("gender", nextValue)}
-          disabled={disabled}
           options={["", "female", "male", "non-binary", "prefer not to say"]}
         />
         <SelectField
           label="Device"
           value={value.device}
           onChange={(nextValue) => updateField("device", nextValue)}
-          disabled={disabled}
           options={["headset mic", "laptop mic", "mobile mic", "studio mic"]}
         />
         <SelectField
           label="Room"
           value={value.noise_condition}
           onChange={(nextValue) => updateField("noise_condition", nextValue)}
-          disabled={disabled}
           options={["quiet room", "light background noise", "office noise", "street noise"]}
         />
         <SelectField
           label="Domain"
           value={value.domain}
           onChange={(nextValue) => updateField("domain", nextValue)}
-          disabled={disabled}
           options={["healthcare", "support", "general", "finance", "education"]}
         />
       </div>

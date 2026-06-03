@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildReaderTaskProgress,
+  isRecordingContextComplete,
   nextScriptIndexAfterSave,
   redoNotificationCount,
+  shouldRenderRecordingContextPanel,
   shouldShowRecordingContext,
 } from "../lib/reader-flow";
 
@@ -24,6 +26,38 @@ describe("reader flow", () => {
     expect(shouldShowRecordingContext("recording")).toBe(false);
     expect(shouldShowRecordingContext("paused")).toBe(false);
     expect(shouldShowRecordingContext("saving")).toBe(false);
+  });
+
+  it("only renders recording context when the reader has it open and capture is inactive", () => {
+    expect(shouldRenderRecordingContextPanel("idle", true)).toBe(true);
+    expect(shouldRenderRecordingContextPanel("idle", false)).toBe(false);
+    expect(shouldRenderRecordingContextPanel("review", true)).toBe(true);
+    expect(shouldRenderRecordingContextPanel("countdown", true)).toBe(false);
+    expect(shouldRenderRecordingContextPanel("recording", true)).toBe(false);
+    expect(shouldRenderRecordingContextPanel("paused", true)).toBe(false);
+    expect(shouldRenderRecordingContextPanel("saving", true)).toBe(false);
+  });
+
+  it("treats core reader context details as complete once the meaningful choices are set", () => {
+    const initialContext = {
+      accent: "",
+      state: "",
+      age_group: "",
+      gender: "",
+      device: "laptop mic",
+      noise_condition: "quiet room",
+      domain: "healthcare",
+    };
+
+    expect(isRecordingContextComplete(initialContext)).toBe(false);
+    expect(
+      isRecordingContextComplete({
+        ...initialContext,
+        accent: "Indian English",
+        age_group: "25-34",
+        gender: "female",
+      }),
+    ).toBe(true);
   });
 
   it("summarizes reader task progress from recording review status", () => {

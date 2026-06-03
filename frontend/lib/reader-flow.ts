@@ -7,6 +7,30 @@ export function shouldShowRecordingContext(recordingState: string) {
   return recordingState === "idle" || recordingState === "review";
 }
 
+export function shouldRenderRecordingContextPanel(recordingState: string, panelOpen: boolean) {
+  return panelOpen && shouldShowRecordingContext(recordingState);
+}
+
+type RecordingContextLike = {
+  accent?: string;
+  age_group?: string;
+  gender?: string;
+  device?: string;
+  noise_condition?: string;
+  domain?: string;
+};
+
+export function isRecordingContextComplete(context: RecordingContextLike) {
+  return Boolean(
+    context.accent?.trim() &&
+      context.age_group?.trim() &&
+      context.gender?.trim() &&
+      context.device?.trim() &&
+      context.noise_condition?.trim() &&
+      context.domain?.trim(),
+  );
+}
+
 export type ReaderTaskStatus = "pending" | "submitted" | "accepted" | "redo";
 
 type ReaderScriptLike = {

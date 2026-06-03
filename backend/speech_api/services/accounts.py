@@ -24,7 +24,7 @@ TOKEN_TTL_SECONDS = 12 * 60 * 60
 PASSWORD_RESET_TTL_SECONDS = 30 * 60
 PASSWORD_ITERATIONS = 210_000
 MIN_PASSWORD_LENGTH = 12
-EXAMPLE_SEED_VERSION = "2026-06-01-outcomes-tone-examples-v3"
+EXAMPLE_SEED_VERSION = "2026-06-03-outcomes-tone-examples-v4"
 TONE_TAG_PATTERN = re.compile(r"^\s*(?:\*\*)?\[([A-Za-z][A-Za-z\s-]*)\](?:\*\*)?\s*")
 
 

@@ -19,6 +19,12 @@ function readRuleBody(selector: string) {
   return match[1];
 }
 
+function readRuleBodies(selector: string) {
+  const css = readFileSync(cssPath, "utf8");
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [...css.matchAll(new RegExp(`${escapedSelector}\\s*\\{([\\s\\S]*?)\\n\\}`, "gm"))].map((match) => match[1]);
+}
+
 function readComponent() {
   return readFileSync(componentPath, "utf8");
 }
@@ -69,6 +75,19 @@ describe("reader presentation styles", () => {
     expect(css).toContain('.tone-chip[data-tooltip][data-tooltip-open="true"]::after');
   });
 
+  it("gives user dialogue lines a softer shaded treatment", () => {
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(css).toContain(".tone-user");
+    const userToneStyles = readRuleBodies(".tone-user").join("\n");
+    const userLineStyles = readRuleBody(".tone-line.tone-user > span:last-child");
+
+    expect(userToneStyles).toMatch(/--tone-bg\s*:/);
+    expect(userToneStyles).toMatch(/--tone-ink\s*:/);
+    expect(userLineStyles).toMatch(/background\s*:/);
+    expect(userLineStyles).toMatch(/color\s*:/);
+  });
+
   it("makes countdown and pause/resume controls prominent during recording", () => {
     const component = readComponent();
     const css = readFileSync(cssPath, "utf8");
@@ -115,13 +134,33 @@ describe("reader presentation styles", () => {
 
     expect(component).toContain("Reject");
     expect(component).toContain("Rejected by reviewer.");
-    expect(component).toContain("TaskProgressPanel");
     expect(component).toContain("NotificationBell");
     expect(component).toContain("Redo requested");
     expect(component).toContain("Completed");
     expect(component).toContain("Pending");
-    expect(css).toContain(".task-progress-panel");
+    expect(component).not.toContain("TaskProgressPanel");
+    expect(css).not.toContain(".task-progress-panel");
     expect(css).toContain(".notification-button");
     expect(css).toContain(".redo-alert");
+  });
+
+  it("keeps recording context optional and out of active capture states", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("recording-context-toggle");
+    expect(component).toContain("Show context");
+    expect(component).toContain("Hide context");
+    expect(component).toContain("context-close-button");
+    expect(component).toContain("shouldRenderRecordingContextPanel(recordingState, contextPanelOpen)");
+    expect(component).toContain("isRecordingContextComplete(recordingContext)");
+    expect(css).toContain(".recording-context-toggle");
+    expect(css).toContain(".context-close-button");
+
+    const recorderContextPanelStyles = readRuleBodies(".recording-context-panel").find((body) =>
+      body.includes("width: min(100%, 56rem);"),
+    );
+    expect(recorderContextPanelStyles).toMatch(/max-height\s*:/);
+    expect(recorderContextPanelStyles).toMatch(/overflow\s*:/);
   });
 });
