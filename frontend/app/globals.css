@@ -963,6 +963,26 @@ p {
   gap: 0.45rem;
 }
 
+.quality-status {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 2rem;
+  padding: 0.36rem 0.55rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.quality-status.failed {
+  color: #7a1f2e;
+  background: #fff5f6;
+  border-color: rgba(211, 67, 90, 0.2);
+}
+
 .metric-pill {
   display: grid;
   gap: 0.08rem;
@@ -2097,6 +2117,19 @@ p {
   background: #fff5f6;
   border: 1px solid rgba(211, 67, 90, 0.2);
   border-radius: 8px;
+}
+
+.background-save-banner {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  justify-content: space-between;
+  width: min(100%, 42rem);
+  pointer-events: auto;
+}
+
+.background-save-banner span {
+  min-width: 0;
 }
 
 .saved-note {

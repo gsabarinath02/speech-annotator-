@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile, status
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
@@ -243,6 +243,7 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
                     payload.setdefault("review_note", "")
                     payload.setdefault("reviewed_at", "")
                     payload.setdefault("quality", {})
+                    payload.setdefault("quality_status", "complete" if payload.get("quality") else "pending")
                     recordings.append(payload)
 
         return sorted(recordings, key=lambda item: item.get("timestamp", ""), reverse=True)
@@ -267,6 +268,37 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
             if recording.get("id") == recording_id:
                 return recording
         return None
+
+    def update_recording_quality(recording_id: str, quality: dict[str, Any], quality_status: str) -> None:
+        if hasattr(account_store, "update_recording_quality"):
+            account_store.update_recording_quality(recording_id, quality, quality_status)
+            return
+
+        for child in sorted(settings.upload_dir.iterdir()):
+            if not child.is_dir() or child.name == "_state":
+                continue
+            for metadata_path in child.glob("*_metadata.json"):
+                metadata = read_json(metadata_path, {})
+                changed = False
+                for recording in metadata.get("recordings", []):
+                    current_id = recording.get("id") or recording.get("sha256")
+                    if current_id != recording_id:
+                        continue
+                    recording["quality"] = quality
+                    recording["quality_status"] = quality_status
+                    changed = True
+                    break
+                if changed:
+                    write_json_atomic(metadata_path, metadata)
+                    return
+
+    def run_recording_quality_analysis(recording_id: str, file_path: str, transcript: str) -> None:
+        try:
+            audio_bytes = Path(file_path).read_bytes()
+            quality = analyze_training_audio(audio_bytes, transcript)
+            update_recording_quality(recording_id, quality, "complete")
+        except Exception:
+            update_recording_quality(recording_id, {}, "failed")
 
     def list_assignments() -> list[dict[str, Any]]:
         if hasattr(account_store, "list_assignments"):
@@ -683,6 +715,7 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
     @app.post("/submit_audio", status_code=201)
     async def submit_recording(
         audio: Annotated[UploadFile, File()],
+        background_tasks: BackgroundTasks,
         current_user: dict[str, Any] = Depends(require_user),
         script_id: Annotated[Optional[str], Form()] = None,
         prompt_id: Annotated[Optional[str], Form()] = None,
@@ -784,7 +817,8 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         file_path = speaker_dir / filename
         file_path.write_bytes(original_bytes)
         digest = hashlib.sha256(original_bytes).hexdigest()
-        quality = analyze_training_audio(original_bytes, resolved_sentence)
+        quality: dict[str, Any] = {}
+        quality_status = "pending"
         recording = {
             "id": recording_id,
             "user_id": public_user["id"],
@@ -805,6 +839,7 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
             "audio": wav_info.to_dict(),
             "storage": {"preserved_original_bytes": True, "server_transcoded": False},
             "quality": quality,
+            "quality_status": quality_status,
             "review_status": "pending",
             "review_note": "",
             "reviewed_at": "",
@@ -814,6 +849,7 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         else:
             metadata.setdefault("recordings", []).append(recording)
             write_json_atomic(metadata_path, metadata)
+        background_tasks.add_task(run_recording_quality_analysis, recording_id, str(file_path), resolved_sentence)
 
         return {
             "message": "Recording saved successfully",
@@ -826,6 +862,7 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
             "script": script_payload,
             "prompt": prompt_payload,
             "quality": quality,
+            "quality_status": quality_status,
             "review_status": "pending",
             "review_note": "",
             "storage": {"preserved_original_bytes": True, "server_transcoded": False},

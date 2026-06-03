@@ -78,9 +78,8 @@ def test_admin_dataset_workflow_covers_assignments_review_exports_and_snapshots(
     assert recording.status_code == 201
     recording_payload = recording.json()
     assert recording_payload["review_status"] == "pending"
-    assert recording_payload["quality"]["speed_wpm"] > 0
-    assert "background_noise_db" in recording_payload["quality"]
-    assert "pitch" in recording_payload["quality"]
+    assert recording_payload["quality_status"] == "pending"
+    assert recording_payload["quality"] == {}
 
     reviewed = client.post(
         f"/api/admin/recordings/{recording_payload['id']}/review",
@@ -90,6 +89,10 @@ def test_admin_dataset_workflow_covers_assignments_review_exports_and_snapshots(
     assert reviewed.status_code == 200
     assert reviewed.json()["review_status"] == "accepted"
     assert reviewed.json()["review_note"] == "Clean healthcare read."
+    assert reviewed.json()["quality_status"] == "complete"
+    assert reviewed.json()["quality"]["speed_wpm"] > 0
+    assert "background_noise_db" in reviewed.json()["quality"]
+    assert "pitch" in reviewed.json()["quality"]
 
     dashboard = client.get("/api/admin/dataset-dashboard", headers=auth(admin_token))
     assert dashboard.status_code == 200

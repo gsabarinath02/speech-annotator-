@@ -130,13 +130,23 @@ describe("reader presentation styles", () => {
     const css = readFileSync(cssPath, "utf8");
 
     expect(component).toContain("uploadProgress");
-    expect(component).toContain("Saving...");
+    expect(component).toContain("Saving in background");
     expect(component).toContain("Retry save");
     expect(component).toContain("beforeunload");
     expect(component).toContain("You have an unsaved recording.");
     expect(component).toContain("onUploadProgress");
     expect(css).toContain(".upload-progress");
     expect(css).toContain(".upload-error");
+  });
+
+  it("uploads during review so readers can continue without waiting on save", () => {
+    const component = readComponent();
+
+    expect(component).toContain("startBackgroundUpload(nextRecording");
+    expect(component).toContain("backgroundSave");
+    expect(component).toContain("shouldAdvance");
+    expect(component).toContain("Next task opened");
+    expect(component).toContain("Retry background save");
   });
 
   it("shows admin rejection controls and reader task notifications", () => {

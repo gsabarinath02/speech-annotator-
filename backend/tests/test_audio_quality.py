@@ -2,6 +2,7 @@ import hashlib
 import json
 import struct
 
+import pytest
 from fastapi.testclient import TestClient
 
 from speech_api.main import create_app
@@ -108,3 +109,58 @@ def test_submit_recording_stores_original_wav_bytes_without_transcoding(tmp_path
     metadata = json.loads((tmp_path / user_id / f"{user_id}_metadata.json").read_text())
     assert metadata["recordings"][0]["sha256"] == digest
     assert metadata["recordings"][0]["audio"]["audio_format"] == "IEEE_FLOAT"
+
+
+def test_submit_recording_returns_before_quality_analysis_finishes(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_analysis(_content: bytes, _transcript: str) -> dict[str, object]:
+        raise RuntimeError("quality worker unavailable")
+
+    monkeypatch.setattr("speech_api.main.analyze_training_audio", fail_analysis)
+    app = create_app(upload_dir=tmp_path)
+    client = TestClient(app)
+    audio = make_wav()
+    admin_login = client.post(
+        "/api/auth/login",
+        json={"email": "admin@local.test", "password": "Admin@12345"},
+    )
+    admin_token = admin_login.json()["token"]
+    created_user = client.post(
+        "/api/admin/users",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"email": "speaker-002@example.com", "password": "VoicePass123!", "display_name": "Speaker Two"},
+    )
+    user_id = created_user.json()["id"]
+    user_login = client.post(
+        "/api/auth/login",
+        json={"email": "speaker-002@example.com", "password": "VoicePass123!"},
+    )
+    user_token = user_login.json()["token"]
+
+    response = client.post(
+        "/api/recordings",
+        headers={"Authorization": f"Bearer {user_token}"},
+        data={
+            "speaker_id": "speaker-002",
+            "sentence_index": "0",
+            "sentence": "Quality runs after the save response.",
+            "state": "Karnataka",
+            "profession": "voice process",
+            "gender": "female",
+            "proficiency": "advanced",
+            "test_taken": "Other",
+        },
+        files={"audio": ("sample.wav", audio, "audio/wav")},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["quality_status"] == "pending"
+    assert payload["quality"] == {}
+
+    metadata = json.loads((tmp_path / user_id / f"{user_id}_metadata.json").read_text())
+    stored = metadata["recordings"][0]
+    assert stored["id"] == payload["id"]
+    assert stored["quality_status"] == "failed"
+    assert stored["quality"] == {}

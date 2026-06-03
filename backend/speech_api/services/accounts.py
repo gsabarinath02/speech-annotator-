@@ -838,6 +838,7 @@ class PostgresAccountStore(AccountStore):
             audio JSONB NOT NULL,
             storage JSONB NOT NULL,
             quality JSONB NOT NULL DEFAULT '{}'::jsonb,
+            quality_status TEXT NOT NULL DEFAULT 'complete',
             review_status TEXT NOT NULL DEFAULT 'pending',
             review_note TEXT NOT NULL DEFAULT '',
             reviewed_at TIMESTAMPTZ
@@ -867,6 +868,7 @@ class PostgresAccountStore(AccountStore):
         );
 
         ALTER TABLE recordings ADD COLUMN IF NOT EXISTS quality JSONB NOT NULL DEFAULT '{}'::jsonb;
+        ALTER TABLE recordings ADD COLUMN IF NOT EXISTS quality_status TEXT NOT NULL DEFAULT 'complete';
         ALTER TABLE recordings ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'pending';
         ALTER TABLE recordings ADD COLUMN IF NOT EXISTS review_note TEXT NOT NULL DEFAULT '';
         ALTER TABLE recordings ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
@@ -1014,6 +1016,7 @@ class PostgresAccountStore(AccountStore):
             "audio": row.get("audio") or {},
             "storage": row.get("storage") or {},
             "quality": row.get("quality") or {},
+            "quality_status": row.get("quality_status") or ("complete" if row.get("quality") else "pending"),
             "review_status": row.get("review_status") or "pending",
             "review_note": row.get("review_note") or "",
             "reviewed_at": iso_datetime(row.get("reviewed_at")),
@@ -1387,9 +1390,9 @@ class PostgresAccountStore(AccountStore):
                 INSERT INTO recordings (
                     id, user_id, user_snapshot, script_id, prompt_id, take_number, is_best_take,
                     sentence_index, sentence, script, prompt, profile, file_path, filename,
-                    recorded_at, sha256, audio, storage, quality, review_status, review_note
+                    recorded_at, sha256, audio, storage, quality, quality_status, review_status, review_note
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     recording["id"],
@@ -1411,11 +1414,35 @@ class PostgresAccountStore(AccountStore):
                     Jsonb(recording["audio"]),
                     Jsonb(recording["storage"]),
                     Jsonb(recording.get("quality", {})),
+                    recording.get("quality_status", "complete" if recording.get("quality") else "pending"),
                     recording.get("review_status", "pending"),
                     recording.get("review_note", ""),
                 ),
             )
         return recording
+
+    def update_recording_quality(
+        self,
+        recording_id: str,
+        quality: dict[str, Any],
+        quality_status: str = "complete",
+    ) -> dict[str, Any]:
+        with self.pool.connection() as connection:
+            result = connection.execute(
+                """
+                UPDATE recordings
+                SET quality = %s,
+                    quality_status = %s
+                WHERE id = %s
+                """,
+                (Jsonb(quality), quality_status, recording_id),
+            )
+            if result.rowcount == 0:
+                raise NotFoundError("Recording not found")
+        refreshed = self.find_recording(recording_id)
+        if not refreshed:
+            raise NotFoundError("Recording not found")
+        return refreshed
 
     def list_recordings(self) -> list[dict[str, Any]]:
         with self.pool.connection() as connection:

@@ -38,6 +38,7 @@ import {
   AdminRecording,
   DatasetDashboard,
   DatasetSnapshot,
+  RecordingResponse,
   ReviewStatus,
   Script,
   Session,
@@ -91,6 +92,19 @@ type RecordingContext = {
   device: string;
   noise_condition: string;
   domain: string;
+};
+
+type BackgroundSave = {
+  id: string;
+  scriptId: string;
+  scriptIndex: number;
+  recording: TrainingRecording;
+  formData: FormData;
+  status: "uploading" | "saved" | "failed";
+  progress: number;
+  shouldAdvance: boolean;
+  response?: RecordingResponse;
+  error?: string;
 };
 
 const TONE_PATTERN = /^\s*(?:\*\*)?\[([A-Za-z][A-Za-z\s-]*)\](?:\*\*)?\s*/;
@@ -1321,7 +1335,9 @@ function ScriptRecorder({
   });
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState("");
+  const [backgroundSave, setBackgroundSave] = useState<BackgroundSave | null>(null);
   const recorderRef = useRef<TrainingAudioRecorder | null>(null);
+  const backgroundSaveRef = useRef<BackgroundSave | null>(null);
   const micMonitorRef = useRef<MicrophoneLevelMonitor | null>(null);
   const scriptScrollRef = useRef<HTMLDivElement | null>(null);
   const lineRefs = useRef<Array<HTMLParagraphElement | null>>([]);
@@ -1341,8 +1357,18 @@ function ScriptRecorder({
   const hasBlockingQualityWarning = qualityWarnings.some((warning) => warning.severity === "error");
   const captureIsActive = recordingState === "recording" || recordingState === "paused";
   const dockClassName = captureIsActive ? `recorder-dock ${recordingState}` : "recorder-dock";
-  const uploadPercent = Math.round(Math.max(0, Math.min(1, uploadProgress)) * 100);
-  const saveButtonLabel = recordingState === "saving" ? `Saving... ${uploadPercent}%` : uploadError ? "Retry save" : "Save";
+  const activeBackgroundSave = backgroundSave && recording && backgroundSave.recording === recording ? backgroundSave : null;
+  const uploadPercent = Math.round(
+    Math.max(0, Math.min(1, activeBackgroundSave?.progress ?? backgroundSave?.progress ?? uploadProgress)) * 100,
+  );
+  const saveButtonLabel =
+    activeBackgroundSave?.status === "uploading"
+      ? `Next (${uploadPercent}%)`
+      : activeBackgroundSave?.status === "saved"
+        ? "Next"
+        : activeBackgroundSave?.status === "failed" || uploadError
+          ? "Retry save"
+          : "Save";
   const statusText =
     recordingState === "countdown"
       ? `Starting in ${countdown}`
@@ -1350,8 +1376,12 @@ function ScriptRecorder({
         ? "Recording"
         : recordingState === "paused"
           ? "Paused"
-          : recordingState === "saving"
-            ? "Saving..."
+          : activeBackgroundSave?.status === "uploading"
+            ? "Saving in background"
+            : backgroundSave?.status === "uploading"
+              ? "Saving previous take"
+              : backgroundSave?.status === "failed"
+                ? "Save needs retry"
             : recording
               ? "Ready to save"
               : "Ready";
@@ -1391,6 +1421,117 @@ function ScriptRecorder({
       updateActiveLineFromScroll();
     });
   }, [updateActiveLineFromScroll]);
+
+  const updateBackgroundSave = useCallback(
+    (nextSave: BackgroundSave | null | ((current: BackgroundSave | null) => BackgroundSave | null)) => {
+      setBackgroundSave((current) => {
+        const resolved = typeof nextSave === "function" ? nextSave(current) : nextSave;
+        backgroundSaveRef.current = resolved;
+        return resolved;
+      });
+    },
+    [],
+  );
+
+  const buildRecordingFormData = useCallback(
+    (targetRecording: TrainingRecording, targetScript: Script) => {
+      const formData = new FormData();
+      formData.append("script_id", targetScript.id);
+      formData.append("audio", targetRecording.blob, `${session.user.id}_${String(targetScript.index).padStart(4, "0")}.wav`);
+      Object.entries(recordingContext).forEach(([key, value]) => {
+        if (value.trim()) formData.append(key, value.trim());
+      });
+      return formData;
+    },
+    [recordingContext, session.user.id],
+  );
+
+  const uploadBackgroundSave = useCallback(
+    (job: BackgroundSave) => {
+      updateBackgroundSave((current) =>
+        current?.id === job.id
+          ? { ...current, status: "uploading", progress: job.progress, error: "" }
+          : { ...job, status: "uploading", progress: job.progress, error: "" },
+      );
+      setUploadProgress(job.progress);
+      setUploadError("");
+
+      void saveRecording(job.formData, session.token, {
+        onUploadProgress: (progress) => {
+          updateBackgroundSave((current) =>
+            current?.id === job.id ? { ...current, status: "uploading", progress, error: "" } : current,
+          );
+          setUploadProgress(progress);
+        },
+      })
+        .then((response) => {
+          let advancedWhileUploading = false;
+          updateBackgroundSave((current) => {
+            if (!current || current.id !== job.id) return current;
+            advancedWhileUploading = current.shouldAdvance;
+            if (advancedWhileUploading) return null;
+            return { ...current, status: "saved", progress: 1, response, error: "" };
+          });
+          setUploadProgress(advancedWhileUploading ? 0 : 1);
+          setUploadError("");
+          void refresh();
+          if (advancedWhileUploading) {
+            const savedTakeLabel = response.take_number ? `Take ${response.take_number}` : "Recording";
+            setNotice(`${savedTakeLabel} saved in background.`);
+          }
+        })
+        .catch((saveError) => {
+          const saveErrorMessage = saveError instanceof Error ? saveError.message : "Recording could not be saved.";
+          let shouldShowRetry = false;
+          updateBackgroundSave((current) => {
+            if (!current || current.id !== job.id) return current;
+            shouldShowRetry = true;
+            return { ...current, status: "failed", progress: 0, error: saveErrorMessage };
+          });
+          if (shouldShowRetry) {
+            setUploadProgress(0);
+            setUploadError(`${saveErrorMessage} Your recording is still here. Retry save when ready.`);
+            setError(saveErrorMessage);
+          }
+        });
+    },
+    [refresh, session.token, setError, setNotice, updateBackgroundSave],
+  );
+
+  const startBackgroundUpload = useCallback(
+    (nextRecording: TrainingRecording, currentScript: Script, currentScriptIndex: number) => {
+      const localWarnings = analyzeRecordingQuality(nextRecording);
+      if (localWarnings.some((warning) => warning.severity === "error")) {
+        setUploadError("Please record again before saving silent audio.");
+        return null;
+      }
+
+      const job: BackgroundSave = {
+        id: `${currentScript.id}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        scriptId: currentScript.id,
+        scriptIndex: currentScriptIndex,
+        recording: nextRecording,
+        formData: buildRecordingFormData(nextRecording, currentScript),
+        status: "uploading",
+        progress: 0,
+        shouldAdvance: false,
+      };
+      updateBackgroundSave(job);
+      uploadBackgroundSave(job);
+      return job;
+    },
+    [buildRecordingFormData, updateBackgroundSave, uploadBackgroundSave],
+  );
+
+  const retryBackgroundSave = useCallback(
+    (job: BackgroundSave) => {
+      const retryJob: BackgroundSave = { ...job, status: "uploading", progress: 0, error: "" };
+      updateBackgroundSave(retryJob);
+      uploadBackgroundSave(retryJob);
+      return retryJob;
+    },
+    [updateBackgroundSave, uploadBackgroundSave],
+  );
 
   const startRecording = useCallback(async () => {
     setError("");
@@ -1457,11 +1598,14 @@ function ScriptRecorder({
       recorderRef.current = null;
       setRecording(nextRecording);
       setRecordingState("review");
+      if (script) {
+        startBackgroundUpload(nextRecording, script, safeScriptIndex);
+      }
     } catch (recordingError) {
       setError(recordingError instanceof Error ? recordingError.message : "Recording could not stop.");
       setRecordingState("idle");
     }
-  }, [setError]);
+  }, [safeScriptIndex, script, setError, startBackgroundUpload]);
 
   const beginCountdown = useCallback(() => {
     if (
@@ -1546,7 +1690,8 @@ function ScriptRecorder({
   }, []);
 
   useEffect(() => {
-    if (!recording) return undefined;
+    const hasPendingBackgroundSave = backgroundSave?.status === "uploading" || backgroundSave?.status === "failed";
+    if (!recording && !hasPendingBackgroundSave) return undefined;
 
     function warnBeforeLeaving(event: BeforeUnloadEvent) {
       event.preventDefault();
@@ -1556,7 +1701,7 @@ function ScriptRecorder({
 
     window.addEventListener("beforeunload", warnBeforeLeaving);
     return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
-  }, [recording]);
+  }, [backgroundSave?.status, recording]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -1608,7 +1753,42 @@ function ScriptRecorder({
     setElapsedSeconds(0);
   }
 
-  async function saveCurrentRecording() {
+  function advanceAfterBackgroundSaveStarted(job: BackgroundSave) {
+    if (!recording || !script) return;
+
+    const nextScriptIndex = nextScriptIndexAfterSave(safeScriptIndex, scripts.length);
+    const openedNextTask = nextScriptIndex !== safeScriptIndex;
+    const savedTakeLabel = job.response?.take_number ? `Take ${job.response.take_number}` : "Recording";
+
+    updateBackgroundSave((current) => (current?.id === job.id ? { ...current, shouldAdvance: true } : current));
+    if (recording.url) URL.revokeObjectURL(recording.url);
+    setRecording(null);
+    setRecordingState("idle");
+    setSaveResult(
+      job.status === "saved" && !openedNextTask && job.response
+        ? { filename: job.response.filename, sha256: job.response.sha256, takeNumber: job.response.take_number }
+        : null,
+    );
+    setCountdown(0);
+    setElapsedSeconds(0);
+    setUploadError("");
+    setContextPanelOpen(false);
+    if (openedNextTask) {
+      setScriptIndex(nextScriptIndex);
+      setActiveLineIndex(0);
+    }
+
+    if (job.status === "saved") {
+      updateBackgroundSave((current) => (current?.id === job.id ? null : current));
+      setUploadProgress(0);
+      void refresh();
+      setNotice(openedNextTask ? `${savedTakeLabel} saved. Next task opened.` : `${savedTakeLabel} saved. All tasks complete.`);
+    } else {
+      setNotice(openedNextTask ? "Saving in background. Next task opened." : "Saving in background. You can start another take.");
+    }
+  }
+
+  function saveCurrentRecording() {
     if (!recording || !script) return;
     if (hasBlockingQualityWarning) {
       setError("Please record again before saving silent audio.");
@@ -1616,52 +1796,24 @@ function ScriptRecorder({
     }
     setError("");
     setNotice("");
-    setUploadError("");
-    setUploadProgress(0);
     setContextPanelOpen(false);
-    setRecordingState("saving");
 
-    const formData = new FormData();
-    formData.append("script_id", script.id);
-    formData.append("audio", recording.blob, `${session.user.id}_${String(script.index).padStart(4, "0")}.wav`);
-    Object.entries(recordingContext).forEach(([key, value]) => {
-      if (value.trim()) formData.append(key, value.trim());
-    });
+    const currentBackgroundSave =
+      activeBackgroundSave?.scriptId === script.id ? activeBackgroundSave : startBackgroundUpload(recording, script, safeScriptIndex);
+    if (!currentBackgroundSave) return;
 
-    try {
-      const response = await saveRecording(formData, session.token, {
-        onUploadProgress: (progress) => setUploadProgress(progress),
-      });
-      const nextScriptIndex = nextScriptIndexAfterSave(safeScriptIndex, scripts.length);
-      const openedNextTask = nextScriptIndex !== safeScriptIndex;
-      const savedTakeLabel = response.take_number ? `Take ${response.take_number}` : "Recording";
-
-      setSaveResult(
-        openedNextTask ? null : { filename: response.filename, sha256: response.sha256, takeNumber: response.take_number },
-      );
-      if (recording.url) URL.revokeObjectURL(recording.url);
-      setRecording(null);
-      setRecordingState("idle");
-      setUploadProgress(0);
-      setUploadError("");
-      setCountdown(0);
-      setElapsedSeconds(0);
-      if (openedNextTask) {
-        setScriptIndex(nextScriptIndex);
-        setActiveLineIndex(0);
-      }
-      await refresh();
-      setNotice(openedNextTask ? `${savedTakeLabel} saved. Next task opened.` : `${savedTakeLabel} saved. All tasks complete.`);
-    } catch (saveError) {
-      const saveErrorMessage = saveError instanceof Error ? saveError.message : "Recording could not be saved.";
-      setError(saveErrorMessage);
-      setUploadError(`${saveErrorMessage} Your recording is still here. Retry save when ready.`);
-      setRecordingState("review");
+    if (currentBackgroundSave.status === "failed") {
+      const retryJob = retryBackgroundSave(currentBackgroundSave);
+      advanceAfterBackgroundSaveStarted(retryJob);
+      return;
     }
+
+    advanceAfterBackgroundSaveStarted(currentBackgroundSave);
   }
 
   function canLeaveUnsavedRecording() {
     if (!recording) return true;
+    if (activeBackgroundSave?.status === "uploading" || activeBackgroundSave?.status === "saved") return true;
     return window.confirm(`${UNSAVED_RECORDING_MESSAGE} Leave without saving it?`);
   }
 
@@ -1817,6 +1969,14 @@ function ScriptRecorder({
                   onClose={() => setContextPanelOpen(false)}
                 />
               ) : null}
+              {backgroundSave?.status === "failed" && !recording ? (
+                <div className="background-save-banner upload-error" role="alert">
+                  <span>{backgroundSave.error || "Previous recording could not be saved."}</span>
+                  <button className="text-button" type="button" onClick={() => retryBackgroundSave(backgroundSave)}>
+                    Retry background save
+                  </button>
+                </div>
+              ) : null}
               <div className="recorder-control-bar">
                 <div className="dock-quality">
                   <AudioLines size={22} />
@@ -1883,7 +2043,7 @@ function ScriptRecorder({
                 <div className="recording-review-panel">
                   {recording ? <audio className="review-audio" controls src={recording.url} /> : null}
                   {recording ? <QualityWarnings warnings={qualityWarnings} /> : null}
-                  {recordingState === "saving" ? <UploadProgress progress={uploadProgress} /> : null}
+                  {activeBackgroundSave?.status === "uploading" ? <UploadProgress progress={activeBackgroundSave.progress} /> : null}
                   {uploadError ? <div className="upload-error">{uploadError}</div> : null}
                   {saveResult ? (
                     <span className="saved-note">{saveResult.takeNumber ? `Take ${saveResult.takeNumber} saved` : "Saved"}</span>
@@ -1905,7 +2065,7 @@ function UploadProgress({ progress }: { progress: number }) {
 
   return (
     <div className="upload-progress" role="status" aria-live="polite">
-      <span>Saving...</span>
+      <span>Saving in background</span>
       <strong>{uploadPercent}%</strong>
       <progress value={uploadPercent} max={100} aria-label="Upload progress" />
     </div>
@@ -2289,7 +2449,13 @@ function buildLocalPhonemeCoverage(text: string) {
 
 function RecordingQualitySummary({ recording }: { recording: AdminRecording }) {
   const quality = recording.quality;
-  if (!quality) return null;
+  if (recording.quality_status === "pending") {
+    return <span className="quality-status">Quality analyzing</span>;
+  }
+  if (recording.quality_status === "failed") {
+    return <span className="quality-status failed">Quality check failed</span>;
+  }
+  if (!quality || !Object.keys(quality).length) return null;
 
   return (
     <div className="quality-summary">

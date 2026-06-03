@@ -79,6 +79,8 @@ export type RecordingQuality = {
   };
 };
 
+export type RecordingQualityStatus = "pending" | "complete" | "failed";
+
 export type RecordingResponse = {
   id: string;
   filename: string;
@@ -89,6 +91,7 @@ export type RecordingResponse = {
   review_note?: string;
   reviewed_at?: string;
   quality?: RecordingQuality;
+  quality_status?: RecordingQualityStatus;
   script?: Script;
   audio: {
     sample_rate: number;
@@ -121,6 +124,7 @@ export type AdminRecording = {
   audio: RecordingResponse["audio"];
   storage?: RecordingResponse["storage"];
   quality?: RecordingQuality;
+  quality_status?: RecordingQualityStatus;
   review_status?: ReviewStatus;
   review_note?: string;
   reviewed_at?: string;
