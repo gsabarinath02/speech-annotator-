@@ -16,6 +16,7 @@ import {
   KeyRound,
   LogOut,
   Mic,
+  Navigation,
   Pause,
   Play,
   Plus,
@@ -26,6 +27,7 @@ import {
   Square,
   Trash2,
   UserPlus,
+  UserRound,
   Users,
   X,
 } from "lucide-react";
@@ -2111,6 +2113,7 @@ function TonePreview({ segments }: { segments: ToneSegment[] }) {
 function ToneChip({ segment }: { segment: ToneSegment }) {
   const toneLabel = formatToneLabel(segment.tone);
   const guidance = getToneGuidance(segment.tone);
+  const toneIcon = getToneIcon(segment.tone_key);
   const [tooltipOpen, setTooltipOpen] = useState(false);
 
   return (
@@ -2126,9 +2129,20 @@ function ToneChip({ segment }: { segment: ToneSegment }) {
       onFocus={() => setTooltipOpen(true)}
       onMouseLeave={() => setTooltipOpen(false)}
     >
+      {toneIcon ? (
+        <span className="tone-chip-icon" aria-hidden="true">
+          {toneIcon}
+        </span>
+      ) : null}
       <span className="tone-chip-label">{toneLabel}</span>
     </button>
   );
+}
+
+function getToneIcon(toneKey: string) {
+  if (toneKey === "user") return <UserRound size={12} strokeWidth={2.2} />;
+  if (toneKey === "navigator") return <Navigation size={12} strokeWidth={2.2} />;
+  return null;
 }
 
 function parseToneSegments(text: string): ToneSegment[] {

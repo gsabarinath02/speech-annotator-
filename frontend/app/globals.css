@@ -582,6 +582,20 @@ p {
   white-space: nowrap;
 }
 
+.tone-chip-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 0.85rem;
+  height: 0.85rem;
+  margin-right: 0.28rem;
+  color: currentColor;
+}
+
+.tone-chip-icon svg {
+  display: block;
+}
+
 .tone-chip[data-tooltip]::before,
 .tone-chip[data-tooltip]::after {
   position: absolute;

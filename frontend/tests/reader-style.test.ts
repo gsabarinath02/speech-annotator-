@@ -88,6 +88,17 @@ describe("reader presentation styles", () => {
     expect(userLineStyles).toMatch(/color\s*:/);
   });
 
+  it("shows speaker icons for user and navigator tone chips", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("UserRound");
+    expect(component).toContain("Navigation");
+    expect(component).toContain("getToneIcon(segment.tone_key)");
+    expect(component).toContain("tone-chip-icon");
+    expect(css).toContain(".tone-chip-icon");
+  });
+
   it("makes countdown and pause/resume controls prominent during recording", () => {
     const component = readComponent();
     const css = readFileSync(cssPath, "utf8");
