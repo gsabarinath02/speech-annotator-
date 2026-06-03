@@ -550,31 +550,51 @@ p {
   line-height: 1.45;
 }
 
-.tone-chip {
+.tone-chip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  width: fit-content;
+}
+
+.tone-chip,
+.speaker-chip {
   position: relative;
   display: inline-flex;
   align-items: center;
   max-width: 100%;
   width: fit-content;
   padding: 0.18rem 0.48rem;
-  color: var(--tone-ink, var(--ink));
   font-family: inherit;
   font-size: 0.72rem;
   font-weight: 600;
   line-height: 1.2;
   text-align: left;
-  background: var(--tone-bg, var(--purple-soft));
-  border: 1px solid var(--tone-border, var(--line));
   border-radius: 999px;
   appearance: none;
 }
 
-.tone-chip[data-tooltip] {
+.tone-chip {
+  color: var(--tone-ink, var(--ink));
+  background: var(--tone-bg, var(--purple-soft));
+  border: 1px solid var(--tone-border, var(--line));
+}
+
+.speaker-chip {
+  color: var(--speaker-ink, var(--body));
+  background: var(--speaker-bg, var(--surface));
+  border: 1px solid var(--speaker-border, var(--line));
+}
+
+.tone-chip[data-tooltip],
+.speaker-chip[data-tooltip] {
   cursor: help;
   outline: 0;
 }
 
-.tone-chip-label {
+.tone-chip-label,
+.speaker-chip-label {
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -582,7 +602,8 @@ p {
   white-space: nowrap;
 }
 
-.tone-chip-icon {
+.tone-chip-icon,
+.speaker-chip-icon {
   display: inline-grid;
   flex: 0 0 auto;
   place-items: center;
@@ -592,12 +613,15 @@ p {
   color: currentColor;
 }
 
-.tone-chip-icon svg {
+.tone-chip-icon svg,
+.speaker-chip-icon svg {
   display: block;
 }
 
 .tone-chip[data-tooltip]::before,
-.tone-chip[data-tooltip]::after {
+.tone-chip[data-tooltip]::after,
+.speaker-chip[data-tooltip]::before,
+.speaker-chip[data-tooltip]::after {
   position: absolute;
   left: 0;
   z-index: 40;
@@ -609,7 +633,8 @@ p {
     transform 140ms ease;
 }
 
-.tone-chip[data-tooltip]::before {
+.tone-chip[data-tooltip]::before,
+.speaker-chip[data-tooltip]::before {
   top: calc(100% + 0.23rem);
   width: 0;
   height: 0;
@@ -619,7 +644,8 @@ p {
   content: "";
 }
 
-.tone-chip[data-tooltip]::after {
+.tone-chip[data-tooltip]::after,
+.speaker-chip[data-tooltip]::after {
   top: calc(100% + 0.62rem);
   width: min(18rem, 76vw);
   padding: 0.65rem 0.72rem;
@@ -637,10 +663,16 @@ p {
 
 .tone-chip[data-tooltip]:is(:hover, :focus-visible)::before,
 .tone-chip[data-tooltip]:is(:hover, :focus-visible)::after,
+.speaker-chip[data-tooltip]:is(:hover, :focus-visible)::before,
+.speaker-chip[data-tooltip]:is(:hover, :focus-visible)::after,
 .tone-chip[data-tooltip]:focus::before,
 .tone-chip[data-tooltip]:focus::after,
+.speaker-chip[data-tooltip]:focus::before,
+.speaker-chip[data-tooltip]:focus::after,
 .tone-chip[data-tooltip][data-tooltip-open="true"]::before,
-.tone-chip[data-tooltip][data-tooltip-open="true"]::after {
+.tone-chip[data-tooltip][data-tooltip-open="true"]::after,
+.speaker-chip[data-tooltip][data-tooltip-open="true"]::before,
+.speaker-chip[data-tooltip][data-tooltip-open="true"]::after {
   opacity: 1;
   transform: translateY(0);
 }
@@ -697,6 +729,15 @@ p {
   --tone-bg: rgba(19, 16, 45, 0.035);
   --tone-border: rgba(19, 16, 45, 0.08);
   --tone-ink: #686473;
+  --speaker-bg: rgba(19, 16, 45, 0.035);
+  --speaker-border: rgba(19, 16, 45, 0.08);
+  --speaker-ink: #686473;
+}
+
+.speaker-navigator {
+  --speaker-bg: #fff;
+  --speaker-border: rgba(19, 16, 45, 0.14);
+  --speaker-ink: var(--ink);
 }
 
 .script-editor-meta {
@@ -1962,11 +2003,13 @@ p {
   content: "";
 }
 
-.tone-line .tone-chip {
+.tone-line .tone-chip-group {
   position: absolute;
   top: 0.55rem;
-  left: -7.4rem;
-  max-width: 6.6rem;
+  left: -12.2rem;
+  justify-content: flex-end;
+  width: 11.4rem;
+  max-width: 11.4rem;
   font-size: 0.63rem;
   opacity: var(--line-chip-opacity, 1);
   transition:
@@ -2006,7 +2049,7 @@ p {
   opacity: 0.74;
 }
 
-.tone-line.is-active .tone-chip {
+.tone-line.is-active .tone-chip-group {
   transform: translateX(-0.1rem);
 }
 
@@ -2562,8 +2605,10 @@ progress::-webkit-progress-value {
     left: -0.8rem;
   }
 
-  .tone-line .tone-chip {
+  .tone-line .tone-chip-group {
     position: static;
+    justify-content: flex-start;
+    width: auto;
     max-width: none;
     margin-bottom: 0.35rem;
   }

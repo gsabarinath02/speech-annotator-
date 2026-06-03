@@ -13,10 +13,10 @@ import {
   ClipboardCheck,
   Download,
   FileText,
+  Headset,
   KeyRound,
   LogOut,
   Mic,
-  Navigation,
   Pause,
   Play,
   Plus,
@@ -2416,44 +2416,63 @@ function TonePreview({ segments }: { segments: ToneSegment[] }) {
 
 function ToneChip({ segment }: { segment: ToneSegment }) {
   const toneLabel = formatToneLabel(segment.tone);
-  const speakerLabel = segment.speaker ? `${formatToneLabel(segment.speaker)} speaker. ` : "";
+  const speakerLabel = segment.speaker ? formatToneLabel(segment.speaker) : "";
   const guidance = getToneGuidance(segment.tone);
   const speakerTooltip = getSpeakerTooltip(segment.speaker_key);
-  const tooltip = speakerTooltip || guidance;
-  const toneIcon = getToneIcon(segment.speaker_key || segment.tone_key);
-  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const speakerIcon = getToneIcon(segment.speaker_key);
+  const [speakerTooltipOpen, setSpeakerTooltipOpen] = useState(false);
+  const [toneTooltipOpen, setToneTooltipOpen] = useState(false);
 
   return (
-    <button
-      className={`tone-chip tone-${segment.tone_key}`}
-      type="button"
-      data-tooltip={tooltip}
-      data-tooltip-open={tooltipOpen ? "true" : undefined}
-      title={tooltip}
-      aria-label={`${speakerLabel}${toneLabel} tone guidance. ${tooltip}`}
-      onBlur={() => setTooltipOpen(false)}
-      onClick={() => setTooltipOpen(true)}
-      onFocus={() => setTooltipOpen(true)}
-      onMouseLeave={() => setTooltipOpen(false)}
-    >
-      {toneIcon ? (
-        <span className="tone-chip-icon" aria-hidden="true">
-          {toneIcon}
-        </span>
+    <span className="tone-chip-group">
+      {segment.speaker_key ? (
+        <button
+          className={`speaker-chip speaker-${segment.speaker_key}`}
+          type="button"
+          data-tooltip={speakerTooltip}
+          data-tooltip-open={speakerTooltipOpen ? "true" : undefined}
+          title={speakerTooltip}
+          aria-label={`${speakerLabel} speaker. ${speakerTooltip}`}
+          onBlur={() => setSpeakerTooltipOpen(false)}
+          onClick={() => setSpeakerTooltipOpen(true)}
+          onFocus={() => setSpeakerTooltipOpen(true)}
+          onMouseLeave={() => setSpeakerTooltipOpen(false)}
+        >
+          {speakerIcon ? (
+            <span className="speaker-chip-icon" aria-hidden="true">
+              {speakerIcon}
+            </span>
+          ) : null}
+          <span className="speaker-chip-label">{speakerLabel}</span>
+        </button>
       ) : null}
-      <span className="tone-chip-label">{toneLabel}</span>
-    </button>
+      <button
+        className={`tone-chip tone-${segment.tone_key}`}
+        type="button"
+        data-tooltip={guidance}
+        data-tooltip-open={toneTooltipOpen ? "true" : undefined}
+        title={guidance}
+        aria-label={`${toneLabel} tone guidance. ${guidance}`}
+        onBlur={() => setToneTooltipOpen(false)}
+        onClick={() => setToneTooltipOpen(true)}
+        onFocus={() => setToneTooltipOpen(true)}
+        onMouseLeave={() => setToneTooltipOpen(false)}
+      >
+        <span className="tone-chip-label">{toneLabel}</span>
+      </button>
+    </span>
   );
 }
 
-function getToneIcon(toneKey: string) {
+function getToneIcon(toneKey?: string) {
   if (toneKey === "user") return <UserRound size={12} strokeWidth={2.2} />;
-  if (toneKey === "navigator") return <Navigation size={12} strokeWidth={2.2} />;
+  if (toneKey === "navigator") return <Headset size={12} strokeWidth={2.2} />;
   return null;
 }
 
 function getSpeakerTooltip(speakerKey?: string) {
   if (speakerKey === "user") return USER_SPEAKER_TOOLTIP;
+  if (speakerKey === "navigator") return "Navigator line.";
   return "";
 }
 

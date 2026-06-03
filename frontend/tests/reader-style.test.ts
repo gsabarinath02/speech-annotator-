@@ -93,20 +93,26 @@ describe("reader presentation styles", () => {
     expect(userLineStyles).toMatch(/opacity\s*:/);
   });
 
-  it("shows speaker icons for user and navigator tone chips", () => {
+  it("shows separate speaker and emotion bubbles with speaker tooltips", () => {
     const component = readComponent();
     const css = readFileSync(cssPath, "utf8");
 
     expect(component).toContain("UserRound");
-    expect(component).toContain("Navigation");
+    expect(component).toContain("Headset");
     expect(component).toContain("speaker_key");
-    expect(component).toContain("getToneIcon(segment.speaker_key || segment.tone_key)");
+    expect(component).toContain('className="tone-chip-group"');
+    expect(component).toContain("speaker-chip speaker-${segment.speaker_key}");
+    expect(component).toContain("getToneIcon(segment.speaker_key)");
     expect(component).toContain("speaker-${segment.speaker_key}");
     expect(component).toContain("USER_SPEAKER_TOOLTIP");
     expect(component).toContain("getSpeakerTooltip(segment.speaker_key)");
     expect(component).toContain("Don't need to read this.");
-    expect(component).toContain("tone-chip-icon");
-    expect(css).toContain(".tone-chip-icon");
+    expect(component).toContain("speaker-chip-icon");
+    expect(component).toContain("speaker-chip-label");
+    expect(css).toContain(".tone-chip-group");
+    expect(css).toContain(".speaker-chip");
+    expect(css).toContain(".speaker-chip-icon");
+    expect(css).toMatch(/\.speaker-chip\[data-tooltip\]:is\(:hover, :focus-visible\)::after/);
   });
 
   it("makes countdown and pause/resume controls prominent during recording", () => {
