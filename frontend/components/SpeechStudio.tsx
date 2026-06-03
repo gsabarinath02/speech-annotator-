@@ -111,6 +111,7 @@ const TONE_PATTERN = /^\s*(?:\*\*)?\[([A-Za-z][A-Za-z\s-]*)\](?:\*\*)?\s*/;
 const SESSION_STORAGE_KEY = "outcomes-speech-studio-session";
 const LIVE_INPUT_HINTS = ["Too quiet", "Good level", "Too loud"] as const;
 const UNSAVED_RECORDING_MESSAGE = "You have an unsaved recording.";
+const USER_SPEAKER_TOOLTIP = "Don't need to read this.";
 const READING_INSTRUCTIONS = [
   "Maintain a natural, conversational tone.",
   "Keep a healthcare professional baseline: calm, clear, supportive, and confident.",
@@ -2417,6 +2418,8 @@ function ToneChip({ segment }: { segment: ToneSegment }) {
   const toneLabel = formatToneLabel(segment.tone);
   const speakerLabel = segment.speaker ? `${formatToneLabel(segment.speaker)} speaker. ` : "";
   const guidance = getToneGuidance(segment.tone);
+  const speakerTooltip = getSpeakerTooltip(segment.speaker_key);
+  const tooltip = speakerTooltip || guidance;
   const toneIcon = getToneIcon(segment.speaker_key || segment.tone_key);
   const [tooltipOpen, setTooltipOpen] = useState(false);
 
@@ -2424,10 +2427,10 @@ function ToneChip({ segment }: { segment: ToneSegment }) {
     <button
       className={`tone-chip tone-${segment.tone_key}`}
       type="button"
-      data-tooltip={guidance}
+      data-tooltip={tooltip}
       data-tooltip-open={tooltipOpen ? "true" : undefined}
-      title={guidance}
-      aria-label={`${speakerLabel}${toneLabel} tone guidance. ${guidance}`}
+      title={tooltip}
+      aria-label={`${speakerLabel}${toneLabel} tone guidance. ${tooltip}`}
       onBlur={() => setTooltipOpen(false)}
       onClick={() => setTooltipOpen(true)}
       onFocus={() => setTooltipOpen(true)}
@@ -2447,6 +2450,11 @@ function getToneIcon(toneKey: string) {
   if (toneKey === "user") return <UserRound size={12} strokeWidth={2.2} />;
   if (toneKey === "navigator") return <Navigation size={12} strokeWidth={2.2} />;
   return null;
+}
+
+function getSpeakerTooltip(speakerKey?: string) {
+  if (speakerKey === "user") return USER_SPEAKER_TOOLTIP;
+  return "";
 }
 
 function parseToneSegments(text: string): ToneSegment[] {

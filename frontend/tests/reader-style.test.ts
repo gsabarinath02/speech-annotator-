@@ -90,6 +90,7 @@ describe("reader presentation styles", () => {
     expect(speakerUserStyles).toMatch(/--tone-ink\s*:/);
     expect(userLineStyles).toMatch(/background\s*:/);
     expect(userLineStyles).toMatch(/color\s*:/);
+    expect(userLineStyles).toMatch(/opacity\s*:/);
   });
 
   it("shows speaker icons for user and navigator tone chips", () => {
@@ -101,6 +102,9 @@ describe("reader presentation styles", () => {
     expect(component).toContain("speaker_key");
     expect(component).toContain("getToneIcon(segment.speaker_key || segment.tone_key)");
     expect(component).toContain("speaker-${segment.speaker_key}");
+    expect(component).toContain("USER_SPEAKER_TOOLTIP");
+    expect(component).toContain("getSpeakerTooltip(segment.speaker_key)");
+    expect(component).toContain("Don't need to read this.");
     expect(component).toContain("tone-chip-icon");
     expect(css).toContain(".tone-chip-icon");
   });

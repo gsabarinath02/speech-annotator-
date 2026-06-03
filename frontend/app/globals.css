@@ -2000,9 +2000,10 @@ p {
   width: fit-content;
   max-width: 100%;
   padding: 0.18rem 0.5rem;
-  color: #6f6a78;
-  background: rgba(19, 16, 45, 0.035);
+  color: #827d8e;
+  background: rgba(19, 16, 45, 0.026);
   border-radius: 8px;
+  opacity: 0.74;
 }
 
 .tone-line.is-active .tone-chip {
