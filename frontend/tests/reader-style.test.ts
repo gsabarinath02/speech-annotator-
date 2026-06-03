@@ -149,6 +149,24 @@ describe("reader presentation styles", () => {
     expect(component).toContain("Retry background save");
   });
 
+  it("shows a hideable recording activity panel with save history and upload progress", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("RecordingActivityPanel");
+    expect(component).toContain("activityPanelOpen");
+    expect(component).toContain("Hide activity");
+    expect(component).toContain("Show activity");
+    expect(component).toContain("Recording history");
+    expect(component).toContain("Currently saving");
+    expect(component).toContain("Saved successfully");
+    expect(component).toContain("Completed");
+    expect(component).toContain("activity-panel-toggle");
+    expect(css).toContain(".recording-activity-panel");
+    expect(css).toContain(".recording-activity-panel.collapsed");
+    expect(css).toContain(".activity-timeline");
+  });
+
   it("shows admin rejection controls and reader task notifications", () => {
     const component = readComponent();
     const css = readFileSync(cssPath, "utf8");

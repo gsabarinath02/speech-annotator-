@@ -1324,6 +1324,7 @@ function ScriptRecorder({
   const [liveInputLevel, setLiveInputLevel] = useState<LiveInputLevel>(() => classifyLiveInputLevel(null));
   const [contextPanelOpen, setContextPanelOpen] = useState(true);
   const [contextAutoClosed, setContextAutoClosed] = useState(false);
+  const [activityPanelOpen, setActivityPanelOpen] = useState(false);
   const [recordingContext, setRecordingContext] = useState<RecordingContext>({
     accent: "",
     state: "",
@@ -1387,6 +1388,7 @@ function ScriptRecorder({
               : "Ready";
   const contextToggleLabel = contextPanelOpen ? "Hide context" : "Show context";
   const contextToggleTitle = recordingContextComplete ? contextToggleLabel : `${contextToggleLabel} before recording`;
+  const activityToggleLabel = activityPanelOpen ? "Hide activity" : "Show activity";
 
   const updateActiveLineFromScroll = useCallback(() => {
     const scrollElement = scriptScrollRef.current;
@@ -1704,6 +1706,12 @@ function ScriptRecorder({
   }, [backgroundSave?.status, recording]);
 
   useEffect(() => {
+    if (backgroundSave) {
+      setActivityPanelOpen(true);
+    }
+  }, [backgroundSave?.id]);
+
+  useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.code !== "Space" || event.repeat) return;
 
@@ -1836,7 +1844,7 @@ function ScriptRecorder({
       {!script ? (
         <EmptyState icon={<BookOpen size={18} />} text="No scripts assigned yet." />
       ) : (
-        <div className="script-recorder">
+        <div className={activityPanelOpen ? "script-recorder activity-open" : "script-recorder"}>
           <div className="reader-stage">
             {recordingState === "countdown" ? (
               <div className="countdown-overlay" aria-live="assertive" aria-label={`Recording starts in ${countdown}`}>
@@ -1908,6 +1916,15 @@ function ScriptRecorder({
                     >
                       <Play size={14} /> {autoScroll ? "Auto scroll" : "Manual scroll"}
                     </button>
+                    <button
+                      className={activityPanelOpen ? "activity-panel-toggle active" : "activity-panel-toggle"}
+                      type="button"
+                      onClick={() => setActivityPanelOpen((isOpen) => !isOpen)}
+                      aria-label={activityToggleLabel}
+                      aria-expanded={activityPanelOpen}
+                    >
+                      <Bell size={14} /> <span>{activityToggleLabel}</span>
+                    </button>
                   </div>
                 </div>
                 <div className="script-step-strip" aria-label={`${progress}% complete`}>
@@ -1954,6 +1971,14 @@ function ScriptRecorder({
                 </div>
               </div>
             </article>
+            <RecordingActivityPanel
+              open={activityPanelOpen}
+              scripts={scripts}
+              taskProgress={taskProgress}
+              recordings={myRecordings}
+              backgroundSave={backgroundSave}
+              onClose={() => setActivityPanelOpen(false)}
+            />
 
             <aside className={dockClassName}>
               {currentTask?.status === "redo" ? (
@@ -2070,6 +2095,120 @@ function UploadProgress({ progress }: { progress: number }) {
       <progress value={uploadPercent} max={100} aria-label="Upload progress" />
     </div>
   );
+}
+
+function RecordingActivityPanel({
+  open,
+  scripts,
+  taskProgress,
+  recordings,
+  backgroundSave,
+  onClose,
+}: {
+  open: boolean;
+  scripts: Script[];
+  taskProgress: ReturnType<typeof buildReaderTaskProgress>;
+  recordings: AdminRecording[];
+  backgroundSave: BackgroundSave | null;
+  onClose: () => void;
+}) {
+  const sortedRecordings = [...recordings].sort((left, right) => {
+    const leftTime = new Date(left.timestamp ?? "").getTime();
+    const rightTime = new Date(right.timestamp ?? "").getTime();
+    return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+  });
+  const backgroundScript = backgroundSave ? scripts.find((item) => item.id === backgroundSave.scriptId) : undefined;
+  const backgroundProgress = Math.round(Math.max(0, Math.min(1, backgroundSave?.progress ?? 0)) * 100);
+  const completedCount = taskProgress.summary.completed;
+  const pendingCount = taskProgress.summary.pending;
+  const redoCount = taskProgress.summary.redo;
+
+  return (
+    <aside
+      className={open ? "recording-activity-panel" : "recording-activity-panel collapsed"}
+      aria-label="Recording history"
+      aria-hidden={!open}
+    >
+      {open ? (
+        <>
+          <div className="activity-panel-head">
+            <div>
+              <span>Recording history</span>
+              <strong>
+                {completedCount}/{taskProgress.summary.total} completed
+              </strong>
+            </div>
+            <button className="icon-action-button" type="button" onClick={onClose} aria-label="Hide activity">
+              <X size={15} />
+            </button>
+          </div>
+          <div className="activity-summary">
+            <span>
+              <strong>{completedCount}</strong>
+              Completed
+            </span>
+            <span>
+              <strong>{pendingCount}</strong>
+              Pending
+            </span>
+            <span>
+              <strong>{redoCount}</strong>
+              Redo
+            </span>
+          </div>
+          {backgroundSave ? (
+            <div className={`activity-current ${backgroundSave.status}`}>
+              <span>{backgroundSaveStatusLabel(backgroundSave.status)}</span>
+              <strong>{backgroundScript ? scriptDisplayTitle(backgroundScript) : `Task ${backgroundSave.scriptIndex + 1}`}</strong>
+              {backgroundSave.status === "uploading" ? (
+                <div className="activity-progress">
+                  <progress value={backgroundProgress} max={100} aria-label="Currently saving progress" />
+                  <small>{backgroundProgress}%</small>
+                </div>
+              ) : null}
+              {backgroundSave.status === "failed" && backgroundSave.error ? <small>{backgroundSave.error}</small> : null}
+            </div>
+          ) : null}
+          <div className="activity-timeline">
+            {sortedRecordings.length ? (
+              sortedRecordings.map((historyRecording) => (
+                <div className="activity-item" key={historyRecording.id || historyRecording.sha256}>
+                  <span className={`activity-dot ${historyRecording.review_status ?? "pending"}`} aria-hidden="true" />
+                  <div>
+                    <strong>{historyRecording.script ? scriptDisplayTitle(historyRecording.script) : historyRecording.prompt?.text || "Task"}</strong>
+                    <span>{recordingActivityStatusLabel(historyRecording)}</span>
+                    <small>
+                      {historyRecording.take_number ? `Take ${historyRecording.take_number}` : "Take saved"}
+                      {historyRecording.timestamp ? ` - ${formatShortDate(historyRecording.timestamp)}` : ""}
+                    </small>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="activity-empty">
+                <strong>No recordings yet</strong>
+                <span>Completed takes will appear here after saving.</span>
+              </div>
+            )}
+          </div>
+        </>
+      ) : null}
+    </aside>
+  );
+}
+
+function backgroundSaveStatusLabel(status: BackgroundSave["status"]) {
+  if (status === "uploading") return "Currently saving";
+  if (status === "saved") return "Saved successfully";
+  return "Save needs retry";
+}
+
+function recordingActivityStatusLabel(recording: AdminRecording) {
+  if (recording.review_status === "accepted") return "Completed";
+  if (recording.review_status === "needs_redo" || recording.review_status === "rejected") return "Redo requested";
+  if (recording.quality_status === "pending") return "Saved successfully - quality analyzing";
+  if (recording.quality_status === "failed") return "Saved successfully - quality check failed";
+  return "Saved successfully";
 }
 
 function NotificationBell({ count, tasks }: { count: number; tasks: ReaderTaskProgressItem[] }) {
