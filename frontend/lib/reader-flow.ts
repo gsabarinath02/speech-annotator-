@@ -120,3 +120,21 @@ export function buildReaderTaskProgress(
 export function redoNotificationCount(tasks: ReaderTaskProgressItem[]) {
   return tasks.filter((task) => task.status === "redo").length;
 }
+
+export function firstActionableScriptIndex(tasks: ReaderTaskProgressItem[]) {
+  if (!tasks.length) return 0;
+
+  const redoIndex = tasks.findIndex((task) => task.status === "redo");
+  if (redoIndex >= 0) return redoIndex;
+
+  const pendingIndex = tasks.findIndex((task) => task.status === "pending");
+  if (pendingIndex >= 0) return pendingIndex;
+
+  return tasks.length - 1;
+}
+
+export function readerTaskStatusLabel(status?: ReaderTaskStatus) {
+  if (status === "redo") return "Redo requested";
+  if (status === "accepted" || status === "submitted") return "Done";
+  return "Pending";
+}

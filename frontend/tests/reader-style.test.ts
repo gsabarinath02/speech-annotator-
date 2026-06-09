@@ -42,6 +42,9 @@ describe("reader presentation styles", () => {
     const component = readComponent();
 
     expect(component).toContain("READING_INSTRUCTIONS");
+    expect(component).toContain("INSTRUCTIONS_ACKNOWLEDGED_STORAGE_PREFIX");
+    expect(component).toContain("loadInstructionsAcknowledged");
+    expect(component).toContain("storeInstructionsAcknowledged");
     expect(component).toContain("Save moves you to the next task automatically.");
     expect(component).toContain("Pause keeps the same take; Resume continues from where you paused.");
     expect(component).toContain(
@@ -91,6 +94,18 @@ describe("reader presentation styles", () => {
     expect(userLineStyles).toMatch(/background\s*:/);
     expect(userLineStyles).toMatch(/color\s*:/);
     expect(userLineStyles).toMatch(/opacity\s*:/);
+  });
+
+  it("uses blue readable text for lines the recorder should say", () => {
+    const css = readFileSync(cssPath, "utf8");
+    const baseLineStyles = readRuleBody(".tone-line > span:last-child");
+    const userLineStyles = readRuleBodies(".tone-line.speaker-user > span:last-child").join("\n");
+    const navigatorSpeakerStyles = readRuleBody(".speaker-navigator");
+
+    expect(css).toContain("--read-aloud-ink");
+    expect(baseLineStyles).toMatch(/color\s*:\s*var\(--read-aloud-ink\)/);
+    expect(userLineStyles).not.toMatch(/var\(--read-aloud-ink\)/);
+    expect(navigatorSpeakerStyles).toMatch(/--speaker-ink\s*:\s*var\(--read-aloud-ink\)/);
   });
 
   it("shows separate speaker and emotion bubbles with speaker tooltips", () => {
@@ -163,12 +178,15 @@ describe("reader presentation styles", () => {
     const css = readFileSync(cssPath, "utf8");
 
     expect(component).toContain("LiveMicMeter");
+    expect(component).toContain("recordingState !== \"idle\"");
     expect(component).toContain("Too quiet");
     expect(component).toContain("Good level");
     expect(component).toContain("Too loud");
     expect(css).toContain(".mic-meter");
     expect(css).toContain(".mic-meter.good");
     expect(css).toContain(".mic-meter.loud");
+    expect(component).not.toContain("MicrophoneLevelMonitor");
+    expect(component).not.toContain("shouldPreviewMic");
   });
 
   it("protects unsaved recordings during upload", () => {
@@ -220,6 +238,7 @@ describe("reader presentation styles", () => {
     expect(component).toContain("Reject");
     expect(component).toContain("Rejected by reviewer.");
     expect(component).toContain("NotificationBell");
+    expect(component).toContain("firstActionableScriptIndex(taskProgress.tasks)");
     expect(component).toContain("Redo requested");
     expect(component).toContain("Completed");
     expect(component).toContain("Pending");
@@ -227,6 +246,34 @@ describe("reader presentation styles", () => {
     expect(css).not.toContain(".task-progress-panel");
     expect(css).toContain(".notification-button");
     expect(css).toContain(".redo-alert");
+  });
+
+  it("shows the current script status directly in the reader controls", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("readerTaskStatusLabel");
+    expect(component).toContain("reader-current-status");
+    expect(component).toContain("Current task status:");
+    expect(css).toContain(".reader-current-status");
+    expect(css).toContain('.reader-current-status[data-status="pending"]');
+    expect(css).toContain('.reader-current-status[data-status="accepted"]');
+    expect(css).toContain('.reader-current-status[data-status="submitted"]');
+    expect(css).toContain('.reader-current-status[data-status="redo"]');
+  });
+
+  it("keeps utility actions out of the title header in a compact reader rail", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("reader-status-row");
+    expect(component).toContain("reader-utility-rail");
+    expect(component).toContain("reader-utility-button");
+    expect(component).not.toContain("reader-meta-actions");
+    expect(css).toContain(".reader-status-row");
+    expect(css).toContain(".reader-utility-rail");
+    expect(css).toContain(".reader-utility-button");
+    expect(readRuleBody(".reader-utility-rail")).toMatch(/right\s*:\s*clamp\(0\.15rem,\s*0\.7vw,\s*0\.45rem\)/);
   });
 
   it("keeps recording context optional and out of active capture states", () => {

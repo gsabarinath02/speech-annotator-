@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildReaderTaskProgress,
+  firstActionableScriptIndex,
   isRecordingContextComplete,
   nextScriptIndexAfterSave,
+  readerTaskStatusLabel,
   redoNotificationCount,
   shouldRenderRecordingContextPanel,
   shouldShowRecordingContext,
@@ -85,5 +87,38 @@ describe("reader flow", () => {
     expect(progress.tasks.map((task) => task.status)).toEqual(["accepted", "submitted", "redo", "pending"]);
     expect(progress.tasks[2].reviewNote).toBe("Please record again.");
     expect(redoNotificationCount(progress.tasks)).toBe(1);
+  });
+
+  it("resumes on redo work first, then pending work, and otherwise stays on the last task", () => {
+    expect(
+      firstActionableScriptIndex([
+        { scriptId: "script-1", title: "Accepted", status: "accepted", reviewNote: "" },
+        { scriptId: "script-2", title: "Redo", status: "redo", reviewNote: "" },
+        { scriptId: "script-3", title: "Pending", status: "pending", reviewNote: "" },
+      ]),
+    ).toBe(1);
+
+    expect(
+      firstActionableScriptIndex([
+        { scriptId: "script-1", title: "Accepted", status: "accepted", reviewNote: "" },
+        { scriptId: "script-2", title: "Submitted", status: "submitted", reviewNote: "" },
+        { scriptId: "script-3", title: "Pending", status: "pending", reviewNote: "" },
+      ]),
+    ).toBe(2);
+
+    expect(
+      firstActionableScriptIndex([
+        { scriptId: "script-1", title: "Accepted", status: "accepted", reviewNote: "" },
+        { scriptId: "script-2", title: "Submitted", status: "submitted", reviewNote: "" },
+      ]),
+    ).toBe(1);
+  });
+
+  it("labels the current reader task status for clear user guidance", () => {
+    expect(readerTaskStatusLabel("pending")).toBe("Pending");
+    expect(readerTaskStatusLabel("submitted")).toBe("Done");
+    expect(readerTaskStatusLabel("accepted")).toBe("Done");
+    expect(readerTaskStatusLabel("redo")).toBe("Redo requested");
+    expect(readerTaskStatusLabel(undefined)).toBe("Pending");
   });
 });

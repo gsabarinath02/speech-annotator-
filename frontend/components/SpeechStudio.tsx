@@ -69,18 +69,19 @@ import {
   updateRecordingReview,
   updateScript,
 } from "../lib/api";
-import { MicrophoneLevelMonitor } from "../lib/audio/meter";
 import { analyzeRecordingQuality, classifyLiveInputLevel, LiveInputLevel } from "../lib/audio/quality";
 import { TrainingAudioRecorder, TrainingRecording } from "../lib/audio/recorder";
 import {
   buildReaderTaskProgress,
+  firstActionableScriptIndex,
   isRecordingContextComplete,
   nextScriptIndexAfterSave,
+  readerTaskStatusLabel,
   redoNotificationCount,
   shouldRenderRecordingContextPanel,
   shouldShowRecordingContext,
 } from "../lib/reader-flow";
-import type { ReaderTaskProgressItem } from "../lib/reader-flow";
+import type { ReaderTaskProgressItem, ReaderTaskStatus } from "../lib/reader-flow";
 
 type AdminTab = "users" | "scripts" | "recordings" | "dataset";
 type ToneSegment = { tone: string; tone_key: string; speaker?: string; speaker_key?: string; text: string };
@@ -109,6 +110,7 @@ type BackgroundSave = {
 
 const TONE_PATTERN = /^\s*(?:\*\*)?\[([A-Za-z][A-Za-z\s-]*)\](?:\*\*)?\s*/;
 const SESSION_STORAGE_KEY = "outcomes-speech-studio-session";
+const INSTRUCTIONS_ACKNOWLEDGED_STORAGE_PREFIX = "outcomes-speech-studio-instructions-acknowledged";
 const LIVE_INPUT_HINTS = ["Too quiet", "Good level", "Too loud"] as const;
 const UNSAVED_RECORDING_MESSAGE = "You have an unsaved recording.";
 const USER_SPEAKER_TOOLTIP = "Don't need to read this.";
@@ -177,6 +179,22 @@ function clearStoredSession() {
   const storage = getBrowserStorage();
   if (!storage) return;
   storage.removeItem(SESSION_STORAGE_KEY);
+}
+
+function instructionsAcknowledgedKey(userId: string) {
+  return `${INSTRUCTIONS_ACKNOWLEDGED_STORAGE_PREFIX}:${userId}`;
+}
+
+function loadInstructionsAcknowledged(userId: string) {
+  const storage = getBrowserStorage();
+  if (!storage || !userId) return false;
+  return storage.getItem(instructionsAcknowledgedKey(userId)) === "true";
+}
+
+function storeInstructionsAcknowledged(userId: string) {
+  const storage = getBrowserStorage();
+  if (!storage || !userId) return;
+  storage.setItem(instructionsAcknowledgedKey(userId), "true");
 }
 
 export function SpeechStudio() {
@@ -256,6 +274,7 @@ export function SpeechStudio() {
         if (cancelled) return;
         const restoredSession = { ...storedSession, user };
         setSession(restoredSession);
+        setInstructionsAcknowledged(loadInstructionsAcknowledged(user.id));
         storeSession(restoredSession);
         await refreshWorkspace(restoredSession);
       } catch (restoreError) {
@@ -280,6 +299,7 @@ export function SpeechStudio() {
 
   async function handleLoginSuccess(nextSession: Session) {
     setSession(nextSession);
+    setInstructionsAcknowledged(loadInstructionsAcknowledged(nextSession.user.id));
     storeSession(nextSession);
     await refreshWorkspace(nextSession);
   }
@@ -357,6 +377,9 @@ export function SpeechStudio() {
         <ReadingInstructionsModal
           requireAcknowledgement={!instructionsAcknowledged}
           onContinue={() => {
+            if (!instructionsAcknowledged) {
+              storeInstructionsAcknowledged(session.user.id);
+            }
             setInstructionsAcknowledged(true);
             setInstructionsOpen(false);
           }}
@@ -1340,7 +1363,7 @@ function ScriptRecorder({
   const [backgroundSave, setBackgroundSave] = useState<BackgroundSave | null>(null);
   const recorderRef = useRef<TrainingAudioRecorder | null>(null);
   const backgroundSaveRef = useRef<BackgroundSave | null>(null);
-  const micMonitorRef = useRef<MicrophoneLevelMonitor | null>(null);
+  const initialTaskIndexSetRef = useRef(false);
   const scriptScrollRef = useRef<HTMLDivElement | null>(null);
   const lineRefs = useRef<Array<HTMLParagraphElement | null>>([]);
   const programmaticScrollRef = useRef(false);
@@ -1358,6 +1381,7 @@ function ScriptRecorder({
   const qualityWarnings = recording ? analyzeRecordingQuality(recording) : [];
   const hasBlockingQualityWarning = qualityWarnings.some((warning) => warning.severity === "error");
   const captureIsActive = recordingState === "recording" || recordingState === "paused";
+  const showLiveMicMeter = recordingState !== "idle";
   const dockClassName = captureIsActive ? `recorder-dock ${recordingState}` : "recorder-dock";
   const activeBackgroundSave = backgroundSave && recording && backgroundSave.recording === recording ? backgroundSave : null;
   const uploadPercent = Math.round(
@@ -1390,6 +1414,17 @@ function ScriptRecorder({
   const contextToggleLabel = contextPanelOpen ? "Hide context" : "Show context";
   const contextToggleTitle = recordingContextComplete ? contextToggleLabel : `${contextToggleLabel} before recording`;
   const activityToggleLabel = activityPanelOpen ? "Hide activity" : "Show activity";
+
+  useEffect(() => {
+    initialTaskIndexSetRef.current = false;
+  }, [session.user.id]);
+
+  useEffect(() => {
+    if (!scripts.length || initialTaskIndexSetRef.current) return;
+
+    setScriptIndex(firstActionableScriptIndex(taskProgress.tasks));
+    initialTaskIndexSetRef.current = true;
+  }, [scripts.length, taskProgress.tasks]);
 
   const updateActiveLineFromScroll = useCallback(() => {
     const scrollElement = scriptScrollRef.current;
@@ -1519,6 +1554,7 @@ function ScriptRecorder({
         progress: 0,
         shouldAdvance: false,
       };
+      setActivityPanelOpen(true);
       updateBackgroundSave(job);
       uploadBackgroundSave(job);
       return job;
@@ -1529,6 +1565,7 @@ function ScriptRecorder({
   const retryBackgroundSave = useCallback(
     (job: BackgroundSave) => {
       const retryJob: BackgroundSave = { ...job, status: "uploading", progress: 0, error: "" };
+      setActivityPanelOpen(true);
       updateBackgroundSave(retryJob);
       uploadBackgroundSave(retryJob);
       return retryJob;
@@ -1544,8 +1581,6 @@ function ScriptRecorder({
     setUploadProgress(0);
     setElapsedSeconds(0);
     manualScrollPauseUntilRef.current = 0;
-    micMonitorRef.current?.stop();
-    micMonitorRef.current = null;
     setLiveInputLevel(classifyLiveInputLevel(null));
     if (recording?.url) URL.revokeObjectURL(recording.url);
 
@@ -1560,39 +1595,6 @@ function ScriptRecorder({
       setRecordingState("idle");
     }
   }, [recording, setError, setNotice]);
-
-  useEffect(() => {
-    const shouldPreviewMic = Boolean(script) && recordingState === "idle" && !recording;
-    if (!shouldPreviewMic) {
-      micMonitorRef.current?.stop();
-      micMonitorRef.current = null;
-      return undefined;
-    }
-
-    let cancelled = false;
-    const monitor = new MicrophoneLevelMonitor();
-    micMonitorRef.current = monitor;
-
-    void monitor
-      .start((stats) => {
-        if (!cancelled) {
-          setLiveInputLevel(classifyLiveInputLevel(stats));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setLiveInputLevel(classifyLiveInputLevel(null));
-        }
-      });
-
-    return () => {
-      cancelled = true;
-      monitor.stop();
-      if (micMonitorRef.current === monitor) {
-        micMonitorRef.current = null;
-      }
-    };
-  }, [recording, recordingState, script]);
 
   const stopRecording = useCallback(async () => {
     if (!recorderRef.current) return;
@@ -1705,12 +1707,6 @@ function ScriptRecorder({
     window.addEventListener("beforeunload", warnBeforeLeaving);
     return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
   }, [backgroundSave?.status, recording]);
-
-  useEffect(() => {
-    if (backgroundSave) {
-      setActivityPanelOpen(true);
-    }
-  }, [backgroundSave?.id]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -1858,7 +1854,7 @@ function ScriptRecorder({
             <article className="script-reader" aria-label="Recording script">
               <div className="reader-title-row">
                 <h1>{scriptDisplayTitle(script)}</h1>
-                <div className="reader-meta-row">
+                <div className="reader-status-row">
                   <div className="script-reader-head">
                     <button
                       className="reader-step-button"
@@ -1887,52 +1883,58 @@ function ScriptRecorder({
                       <ChevronRight size={18} />
                     </button>
                   </div>
-                  <div className="reader-meta-actions">
-                    {shouldShowRecordingContext(recordingState) ? (
-                      <button
-                        className={contextPanelOpen ? "recording-context-toggle active" : "recording-context-toggle"}
-                        type="button"
-                        onClick={() => setContextPanelOpen((isOpen) => !isOpen)}
-                        aria-label={contextToggleLabel}
-                        title={contextToggleTitle}
-                      >
-                        <SlidersHorizontal size={14} />
-                        <span>{contextToggleLabel}</span>
-                      </button>
-                    ) : null}
-                    <button
-                      className="reader-help-button"
-                      type="button"
-                      onClick={onOpenInstructions}
-                      aria-label="Open recording instructions"
-                      title="Recording instructions"
-                    >
-                      <BookOpen size={14} />
-                      <span>Instructions</span>
-                    </button>
-                    <button
-                      className={autoScroll ? "auto-scroll-toggle active" : "auto-scroll-toggle"}
-                      type="button"
-                      onClick={() => setAutoScroll((enabled) => !enabled)}
-                    >
-                      <Play size={14} /> {autoScroll ? "Auto scroll" : "Manual scroll"}
-                    </button>
-                    <button
-                      className={activityPanelOpen ? "activity-panel-toggle active" : "activity-panel-toggle"}
-                      type="button"
-                      onClick={() => setActivityPanelOpen((isOpen) => !isOpen)}
-                      aria-label={activityToggleLabel}
-                      aria-expanded={activityPanelOpen}
-                    >
-                      <Bell size={14} /> <span>{activityToggleLabel}</span>
-                    </button>
-                  </div>
+                  <ReaderTaskStatusPill status={currentTask?.status} />
                 </div>
                 <div className="script-step-strip" aria-label={`${progress}% complete`}>
                   {scripts.map((item, index) => (
                     <span className={index <= safeScriptIndex ? "active" : ""} key={item.id} />
                   ))}
                 </div>
+              </div>
+              <div className="reader-utility-rail" aria-label="Reader tools">
+                {shouldShowRecordingContext(recordingState) ? (
+                  <button
+                    className={
+                      contextPanelOpen
+                        ? "reader-utility-button recording-context-toggle active"
+                        : "reader-utility-button recording-context-toggle"
+                    }
+                    type="button"
+                    onClick={() => setContextPanelOpen((isOpen) => !isOpen)}
+                    aria-label={contextToggleLabel}
+                    title={contextToggleTitle}
+                  >
+                    <SlidersHorizontal size={16} />
+                  </button>
+                ) : null}
+                <button
+                  className="reader-utility-button reader-help-button"
+                  type="button"
+                  onClick={onOpenInstructions}
+                  aria-label="Open recording instructions"
+                  title="Recording instructions"
+                >
+                  <BookOpen size={16} />
+                </button>
+                <button
+                  className={autoScroll ? "reader-utility-button auto-scroll-toggle active" : "reader-utility-button auto-scroll-toggle"}
+                  type="button"
+                  onClick={() => setAutoScroll((enabled) => !enabled)}
+                  aria-label={autoScroll ? "Auto scroll" : "Manual scroll"}
+                  title={autoScroll ? "Auto scroll" : "Manual scroll"}
+                >
+                  <Play size={16} />
+                </button>
+                <button
+                  className={activityPanelOpen ? "reader-utility-button activity-panel-toggle active" : "reader-utility-button activity-panel-toggle"}
+                  type="button"
+                  onClick={() => setActivityPanelOpen((isOpen) => !isOpen)}
+                  aria-label={activityToggleLabel}
+                  aria-expanded={activityPanelOpen}
+                  title={activityToggleLabel}
+                >
+                  <Bell size={16} />
+                </button>
               </div>
               <div className="teleprompter-frame">
                 <div className="teleprompter-focus" aria-hidden="true" />
@@ -2010,7 +2012,7 @@ function ScriptRecorder({
                   <span>
                     <strong>High Quality WAV</strong>
                     <small>48kHz - 32-bit - Mono</small>
-                    <LiveMicMeter level={liveInputLevel} />
+                    {showLiveMicMeter ? <LiveMicMeter level={liveInputLevel} /> : null}
                   </span>
                 </div>
                 <button
@@ -2096,6 +2098,26 @@ function UploadProgress({ progress }: { progress: number }) {
       <strong>{uploadPercent}%</strong>
       <progress value={uploadPercent} max={100} aria-label="Upload progress" />
     </div>
+  );
+}
+
+function ReaderTaskStatusPill({ status }: { status?: ReaderTaskStatus }) {
+  const resolvedStatus = status ?? "pending";
+  const label = readerTaskStatusLabel(status);
+  const icon =
+    resolvedStatus === "redo" ? (
+      <RotateCcw size={14} />
+    ) : resolvedStatus === "pending" ? (
+      <ClipboardCheck size={14} />
+    ) : (
+      <Check size={14} />
+    );
+
+  return (
+    <span className="reader-current-status" data-status={resolvedStatus} aria-label={`Current task status: ${label}`}>
+      {icon}
+      <span>{label}</span>
+    </span>
   );
 }
 
