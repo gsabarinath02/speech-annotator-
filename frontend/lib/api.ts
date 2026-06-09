@@ -44,6 +44,17 @@ export type Script = {
   updated_at?: string;
 };
 
+export type ScriptTicket = {
+  id: string;
+  status: "open" | "resolved" | string;
+  message: string;
+  line_text?: string;
+  created_at: string;
+  resolved_at?: string;
+  user: User;
+  script: Script;
+};
+
 export type ReviewStatus = "pending" | "accepted" | "rejected" | "needs_redo";
 
 export type RecordingProfile = {
@@ -356,6 +367,27 @@ export async function fetchAdminRecordings(token: string): Promise<AdminRecordin
   });
   const payload = await readJsonOrThrow<{ recordings: AdminRecording[] }>(response, "Could not load recordings.");
   return payload.recordings;
+}
+
+export async function createScriptTicket(
+  token: string,
+  ticket: { script_id: string; message: string; line_text?: string },
+): Promise<ScriptTicket> {
+  const response = await fetch(`${API_BASE_URL}/api/tickets`, {
+    method: "POST",
+    headers: { ...authHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify(ticket),
+  });
+  return readJsonOrThrow<ScriptTicket>(response, "Could not submit ticket.");
+}
+
+export async function fetchAdminTickets(token: string): Promise<ScriptTicket[]> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/tickets`, {
+    cache: "no-store",
+    headers: authHeaders(token),
+  });
+  const payload = await readJsonOrThrow<{ tickets: ScriptTicket[] }>(response, "Could not load tickets.");
+  return payload.tickets;
 }
 
 export async function fetchMyRecordings(token: string): Promise<UserRecordingsResponse> {

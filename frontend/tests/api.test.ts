@@ -6,10 +6,12 @@ import {
   bulkReviewRecordings,
   createScript,
   createDatasetSnapshot,
+  createScriptTicket,
   createUser,
   createUserPasswordReset,
   deleteScript,
   exportRecordings,
+  fetchAdminTickets,
   fetchDatasetDashboard,
   fetchMe,
   fetchMyRecordings,
@@ -318,6 +320,50 @@ describe("speech studio API helpers", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/api/admin/users/user-1/password-reset",
       { method: "POST", headers: { Authorization: "Bearer session-token" } },
+    );
+  });
+
+  it("creates script issue tickets and lets admins load them", async () => {
+    const ticket = {
+      id: "ticket-1",
+      status: "open",
+      message: "Wrong medication name.",
+      line_text: "Please read this line.",
+      created_at: "2026-06-01T10:00:00+00:00",
+      user: { id: "user-1", email: "reader@example.com", display_name: "Reader One", role: "user" },
+      script: { id: "script-1", index: 2, title: "Medication call", text: "Please read this line.", line_count: 1 },
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(await jsonResponse(ticket, true, 201))
+      .mockResolvedValueOnce(await jsonResponse({ count: 1, tickets: [ticket] }));
+
+    const created = await createScriptTicket("session-token", {
+      script_id: "script-1",
+      message: "Wrong medication name.",
+      line_text: "Please read this line.",
+    });
+    const tickets = await fetchAdminTickets("session-token");
+
+    expect(created.id).toBe("ticket-1");
+    expect(tickets[0].message).toBe("Wrong medication name.");
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:8000/api/tickets",
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer session-token", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script_id: "script-1",
+          message: "Wrong medication name.",
+          line_text: "Please read this line.",
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:8000/api/admin/tickets",
+      { cache: "no-store", headers: { Authorization: "Bearer session-token" } },
     );
   });
 

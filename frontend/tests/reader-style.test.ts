@@ -231,6 +231,23 @@ describe("reader presentation styles", () => {
     expect(css).toContain(".activity-timeline");
   });
 
+  it("lets readers report script issues and gives admins a tickets view", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("createScriptTicket");
+    expect(component).toContain("fetchAdminTickets");
+    expect(component).toContain("Report script issue");
+    expect(component).toContain("Ticket sent to admin.");
+    expect(component).toContain("AdminTickets");
+    expect(component).toContain("script-ticket-panel");
+    expect(component).toContain("script-ticket-toggle");
+    expect(css).toContain(".script-ticket-panel");
+    expect(css).toContain(".script-ticket-toggle");
+    expect(css).toContain(".ticket-list");
+    expect(css).toContain(".ticket-row");
+  });
+
   it("shows admin rejection controls and reader task notifications", () => {
     const component = readComponent();
     const css = readFileSync(cssPath, "utf8");

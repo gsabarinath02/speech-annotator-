@@ -69,6 +69,12 @@ class ScriptCreateRequest(BaseModel):
     text: str
 
 
+class ScriptTicketCreateRequest(BaseModel):
+    script_id: str
+    message: str
+    line_text: str = ""
+
+
 class AssignmentCreateRequest(BaseModel):
     user_ids: list[str]
     script_ids: list[str]
@@ -544,6 +550,28 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail="Script not found") from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.post("/api/tickets", status_code=201)
+    def create_script_ticket(
+        ticket_request: ScriptTicketCreateRequest,
+        current_user: dict[str, Any] = Depends(require_user),
+    ) -> dict[str, object]:
+        try:
+            return account_store.create_script_ticket(
+                current_user,
+                ticket_request.script_id,
+                ticket_request.message,
+                ticket_request.line_text,
+            )
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Script not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/admin/tickets")
+    def list_script_tickets(_admin: dict[str, Any] = Depends(require_admin)) -> dict[str, object]:
+        tickets = account_store.list_script_tickets()
+        return {"count": len(tickets), "tickets": tickets}
 
     @app.get("/api/admin/assignments")
     def get_assignments(_admin: dict[str, Any] = Depends(require_admin)) -> dict[str, object]:

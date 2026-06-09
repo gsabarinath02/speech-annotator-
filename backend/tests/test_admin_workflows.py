@@ -211,6 +211,66 @@ def test_admin_manages_scripts_and_user_records_full_script(tmp_path, monkeypatc
     assert delete_response.status_code == 204
 
 
+def test_user_reports_script_issue_and_admin_sees_ticket(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("ADMIN_PASSWORD", "AdminPass123!")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    app = create_app(upload_dir=tmp_path)
+    client = TestClient(app)
+    admin_token = client.post(
+        "/api/auth/login",
+        json={"email": "admin@example.com", "password": "AdminPass123!"},
+    ).json()["token"]
+    created_user = client.post(
+        "/api/admin/users",
+        headers=auth(admin_token),
+        json={"email": "ticket-reader@example.com", "password": "VoicePass123!", "display_name": "Ticket Reader"},
+    ).json()
+    user_token = client.post(
+        "/api/auth/login",
+        json={"email": "ticket-reader@example.com", "password": "VoicePass123!"},
+    ).json()["token"]
+    script = client.post(
+        "/api/admin/scripts",
+        headers=auth(admin_token),
+        json={"title": "Script with issue", "text": "[neutral] Please read this line."},
+    ).json()
+
+    empty_ticket = client.post(
+        "/api/tickets",
+        headers=auth(user_token),
+        json={"script_id": script["id"], "message": "   "},
+    )
+    assert empty_ticket.status_code == 422
+
+    created_ticket = client.post(
+        "/api/tickets",
+        headers=auth(user_token),
+        json={
+            "script_id": script["id"],
+            "message": "This line has the wrong medication name.",
+            "line_text": "Please read this line.",
+        },
+    )
+    assert created_ticket.status_code == 201
+    ticket = created_ticket.json()
+    assert ticket["status"] == "open"
+    assert ticket["message"] == "This line has the wrong medication name."
+    assert ticket["line_text"] == "Please read this line."
+    assert ticket["script"]["id"] == script["id"]
+    assert ticket["script"]["title"] == "Script with issue"
+    assert ticket["user"]["id"] == created_user["id"]
+    assert ticket["user"]["email"] == "ticket-reader@example.com"
+
+    user_cannot_list = client.get("/api/admin/tickets", headers=auth(user_token))
+    assert user_cannot_list.status_code == 403
+
+    admin_tickets = client.get("/api/admin/tickets", headers=auth(admin_token))
+    assert admin_tickets.status_code == 200
+    assert admin_tickets.json()["count"] == 1
+    assert admin_tickets.json()["tickets"][0]["id"] == ticket["id"]
+
+
 def test_multiple_script_takes_are_preserved_and_admin_selects_best_take(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("ADMIN_PASSWORD", "AdminPass123!")

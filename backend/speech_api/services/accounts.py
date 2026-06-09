@@ -260,6 +260,7 @@ class AccountStore:
             "password_reset_tokens": [],
             "script_assignments": [],
             "dataset_snapshots": [],
+            "script_tickets": [],
             "example_seed_version": EXAMPLE_SEED_VERSION,
         }
 
@@ -303,6 +304,9 @@ class AccountStore:
         if "dataset_snapshots" not in state:
             state["dataset_snapshots"] = []
             changed = True
+        if "script_tickets" not in state:
+            state["script_tickets"] = []
+            changed = True
         if state.get("example_seed_version") != EXAMPLE_SEED_VERSION:
             seed_ids = {seed_script["id"] for seed_script in self.seed_scripts}
             seed_titles = {seed_script["title"].strip().lower() for seed_script in self.seed_scripts}
@@ -345,6 +349,7 @@ class AccountStore:
                 "password_reset_tokens": [],
                 "script_assignments": [],
                 "dataset_snapshots": [],
+                "script_tickets": [],
             },
         )
 
@@ -716,6 +721,38 @@ class AccountStore:
         ]
         self.save(state)
 
+    def create_script_ticket(
+        self,
+        user: dict[str, Any],
+        script_id: str,
+        message: str,
+        line_text: str = "",
+    ) -> dict[str, Any]:
+        script = self.get_script(script_id)
+        if not script:
+            raise NotFoundError("Script not found")
+        clean_message = message.strip()
+        if not clean_message:
+            raise ValueError("Ticket message is required")
+
+        ticket = {
+            "id": str(uuid.uuid4()),
+            "status": "open",
+            "message": clean_message,
+            "line_text": line_text.strip(),
+            "created_at": utc_now(),
+            "resolved_at": "",
+            "user": self.public_user(user),
+            "script": script,
+        }
+        state = self.load()
+        state.setdefault("script_tickets", []).append(ticket)
+        self.save(state)
+        return ticket
+
+    def list_script_tickets(self) -> list[dict[str, Any]]:
+        return sorted(self.load().get("script_tickets", []), key=lambda item: item.get("created_at", ""), reverse=True)
+
     def create_dataset_snapshot(
         self,
         name: str,
@@ -880,6 +917,22 @@ class PostgresAccountStore(AccountStore):
             created_at TIMESTAMPTZ NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS script_tickets (
+            id TEXT PRIMARY KEY,
+            user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+            user_snapshot JSONB NOT NULL,
+            script_id TEXT REFERENCES scripts(id) ON DELETE SET NULL,
+            script_snapshot JSONB NOT NULL,
+            message TEXT NOT NULL,
+            line_text TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'open',
+            created_at TIMESTAMPTZ NOT NULL,
+            resolved_at TIMESTAMPTZ
+        );
+
+        CREATE INDEX IF NOT EXISTS script_tickets_created_at_idx ON script_tickets(created_at DESC);
+        CREATE INDEX IF NOT EXISTS script_tickets_status_idx ON script_tickets(status);
+
         ALTER TABLE recordings ADD COLUMN IF NOT EXISTS quality JSONB NOT NULL DEFAULT '{}'::jsonb;
         ALTER TABLE recordings ADD COLUMN IF NOT EXISTS quality_status TEXT NOT NULL DEFAULT 'complete';
         ALTER TABLE recordings ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'pending';
@@ -1033,6 +1086,42 @@ class PostgresAccountStore(AccountStore):
             "review_status": row.get("review_status") or "pending",
             "review_note": row.get("review_note") or "",
             "reviewed_at": iso_datetime(row.get("reviewed_at")),
+        }
+
+    def _row_to_script_ticket(self, row: dict[str, Any]) -> dict[str, Any]:
+        user_snapshot = row.get("user_snapshot") or {}
+        if row.get("current_user_id"):
+            user_snapshot = self.public_user(
+                {
+                    "id": row["current_user_id"],
+                    "email": row["current_email"],
+                    "display_name": row["current_display_name"],
+                    "role": row["current_role"],
+                    "created_at": iso_datetime(row.get("current_created_at")),
+                }
+            )
+        script_snapshot = row.get("script_snapshot") or {}
+        if row.get("current_script_id"):
+            script_snapshot = self._row_to_script(
+                {
+                    "id": row["current_script_id"],
+                    "script_index": row["current_script_index"],
+                    "title": row["current_script_title"],
+                    "text": row["current_script_text"],
+                    "line_count": row["current_script_line_count"],
+                    "created_at": row.get("current_script_created_at"),
+                    "updated_at": row.get("current_script_updated_at"),
+                }
+            )
+        return {
+            "id": row["id"],
+            "status": row.get("status") or "open",
+            "message": row.get("message") or "",
+            "line_text": row.get("line_text") or "",
+            "created_at": iso_datetime(row.get("created_at")),
+            "resolved_at": iso_datetime(row.get("resolved_at")),
+            "user": user_snapshot,
+            "script": script_snapshot,
         }
 
     def authenticate(self, email: str, password: str) -> Optional[dict[str, Any]]:
@@ -1376,6 +1465,79 @@ class PostgresAccountStore(AccountStore):
             result = connection.execute("DELETE FROM scripts WHERE id = %s", (script_id,))
             if result.rowcount == 0:
                 raise NotFoundError("Script not found")
+
+    def create_script_ticket(
+        self,
+        user: dict[str, Any],
+        script_id: str,
+        message: str,
+        line_text: str = "",
+    ) -> dict[str, Any]:
+        script = self.get_script(script_id)
+        if not script:
+            raise NotFoundError("Script not found")
+        clean_message = message.strip()
+        if not clean_message:
+            raise ValueError("Ticket message is required")
+
+        ticket = {
+            "id": str(uuid.uuid4()),
+            "status": "open",
+            "message": clean_message,
+            "line_text": line_text.strip(),
+            "created_at": utc_now(),
+            "resolved_at": "",
+            "user": self.public_user(user),
+            "script": script,
+        }
+        with self.pool.connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO script_tickets (
+                    id, user_id, user_snapshot, script_id, script_snapshot,
+                    message, line_text, status, created_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    ticket["id"],
+                    ticket["user"].get("id") or None,
+                    Jsonb(ticket["user"]),
+                    script["id"],
+                    Jsonb(script),
+                    ticket["message"],
+                    ticket["line_text"],
+                    ticket["status"],
+                    ticket["created_at"],
+                ),
+            )
+        return ticket
+
+    def list_script_tickets(self) -> list[dict[str, Any]]:
+        with self.pool.connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    t.*,
+                    u.id AS current_user_id,
+                    u.email AS current_email,
+                    u.display_name AS current_display_name,
+                    u.role AS current_role,
+                    u.created_at AS current_created_at,
+                    s.id AS current_script_id,
+                    s.script_index AS current_script_index,
+                    s.title AS current_script_title,
+                    s.text AS current_script_text,
+                    s.line_count AS current_script_line_count,
+                    s.created_at AS current_script_created_at,
+                    s.updated_at AS current_script_updated_at
+                FROM script_tickets t
+                LEFT JOIN users u ON u.id = t.user_id
+                LEFT JOIN scripts s ON s.id = t.script_id
+                ORDER BY t.created_at DESC
+                """
+            ).fetchall()
+        return [self._row_to_script_ticket(row) for row in rows]
 
     def recording_counts(self) -> dict[str, int]:
         with self.pool.connection() as connection:

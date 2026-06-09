@@ -16,6 +16,7 @@ import {
   Headset,
   KeyRound,
   LogOut,
+  MessageSquareWarning,
   Mic,
   Pause,
   Play,
@@ -41,6 +42,7 @@ import {
   RecordingResponse,
   ReviewStatus,
   Script,
+  ScriptTicket,
   Session,
   User,
   assignScripts,
@@ -48,12 +50,14 @@ import {
   confirmPasswordReset,
   createScript,
   createDatasetSnapshot,
+  createScriptTicket,
   createUser,
   createUserPasswordReset,
   deleteScript,
   deleteUser,
   exportRecordings,
   fetchAdminRecordings,
+  fetchAdminTickets,
   fetchAdminUsers,
   fetchDatasetDashboard,
   fetchDatasetSnapshots,
@@ -83,7 +87,7 @@ import {
 } from "../lib/reader-flow";
 import type { ReaderTaskProgressItem, ReaderTaskStatus } from "../lib/reader-flow";
 
-type AdminTab = "users" | "scripts" | "recordings" | "dataset";
+type AdminTab = "users" | "scripts" | "recordings" | "tickets" | "dataset";
 type ToneSegment = { tone: string; tone_key: string; speaker?: string; speaker_key?: string; text: string };
 type RecordingContext = {
   accent: string;
@@ -205,6 +209,7 @@ export function SpeechStudio() {
   const [scripts, setScripts] = useState<Script[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [recordings, setRecordings] = useState<AdminRecording[]>([]);
+  const [tickets, setTickets] = useState<ScriptTicket[]>([]);
   const [myRecordings, setMyRecordings] = useState<AdminRecording[]>([]);
   const [instructionsAcknowledged, setInstructionsAcknowledged] = useState(false);
   const [instructionsOpen, setInstructionsOpen] = useState(false);
@@ -214,6 +219,7 @@ export function SpeechStudio() {
     setScripts([]);
     setUsers([]);
     setRecordings([]);
+    setTickets([]);
     setMyRecordings([]);
     setInstructionsAcknowledged(false);
     setInstructionsOpen(false);
@@ -230,14 +236,16 @@ export function SpeechStudio() {
     setError("");
     try {
       if (activeSession.user.role === "admin") {
-        const [scriptList, adminUsers, adminRecordings] = await Promise.all([
+        const [scriptList, adminUsers, adminRecordings, adminTickets] = await Promise.all([
           fetchScripts(activeSession.token),
           fetchAdminUsers(activeSession.token),
           fetchAdminRecordings(activeSession.token),
+          fetchAdminTickets(activeSession.token),
         ]);
         setScripts(scriptList);
         setUsers(adminUsers);
         setRecordings(adminRecordings);
+        setTickets(adminTickets);
         setMyRecordings([]);
       } else {
         const [scriptList, ownRecordings] = await Promise.all([
@@ -247,6 +255,7 @@ export function SpeechStudio() {
         setScripts(scriptList);
         setUsers([]);
         setRecordings([]);
+        setTickets([]);
         setMyRecordings(ownRecordings.recordings);
       }
     } catch (workspaceError) {
@@ -358,6 +367,7 @@ export function SpeechStudio() {
           users={users}
           scripts={scripts}
           recordings={recordings}
+          tickets={tickets}
           refresh={() => refreshWorkspace(session)}
           setError={setError}
           setNotice={setNotice}
@@ -573,6 +583,7 @@ function AdminWorkspace({
   users,
   scripts,
   recordings,
+  tickets,
   refresh,
   setError,
   setNotice,
@@ -581,6 +592,7 @@ function AdminWorkspace({
   users: User[];
   scripts: Script[];
   recordings: AdminRecording[];
+  tickets: ScriptTicket[];
   refresh: () => Promise<void> | void;
   setError: (value: string) => void;
   setNotice: (value: string) => void;
@@ -598,6 +610,9 @@ function AdminWorkspace({
         </button>
         <button className={activeTab === "recordings" ? "rail-button active" : "rail-button"} onClick={() => setActiveTab("recordings")}>
           <AudioLines size={17} /> Recordings
+        </button>
+        <button className={activeTab === "tickets" ? "rail-button active" : "rail-button"} onClick={() => setActiveTab("tickets")}>
+          <MessageSquareWarning size={17} /> Tickets
         </button>
         <button className={activeTab === "dataset" ? "rail-button active" : "rail-button"} onClick={() => setActiveTab("dataset")}>
           <BarChart3 size={17} /> Dataset
@@ -620,6 +635,7 @@ function AdminWorkspace({
             setNotice={setNotice}
           />
         ) : null}
+        {activeTab === "tickets" ? <AdminTickets tickets={tickets} /> : null}
         {activeTab === "dataset" ? (
           <AdminDataset
             token={session.token}
@@ -915,6 +931,40 @@ function ScriptEditor({
         </button>
       </div>
     </form>
+  );
+}
+
+function AdminTickets({ tickets }: { tickets: ScriptTicket[] }) {
+  return (
+    <div className="workspace-section">
+      <SectionHead title="Tickets" count={`${tickets.length}`} />
+      <div className="ticket-list">
+        {tickets.length ? (
+          tickets.map((ticket) => (
+            <div className="ticket-row" key={ticket.id}>
+              <div className="ticket-row-head">
+                <span className="ticket-status">{ticket.status}</span>
+                <strong>{ticket.script?.title ? scriptDisplayTitle(ticket.script) : "Script issue"}</strong>
+                <small>{ticket.created_at ? formatDateTime(ticket.created_at) : "Just now"}</small>
+              </div>
+              <p>{ticket.message}</p>
+              {ticket.line_text ? (
+                <blockquote>
+                  <span>Line</span>
+                  {ticket.line_text}
+                </blockquote>
+              ) : null}
+              <div className="ticket-meta">
+                <span>{ticket.user?.display_name || "Reader"}</span>
+                <span>{ticket.user?.email || "No email"}</span>
+              </div>
+            </div>
+          ))
+        ) : (
+          <EmptyState icon={<MessageSquareWarning size={18} />} text="No tickets yet." />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1349,6 +1399,9 @@ function ScriptRecorder({
   const [contextPanelOpen, setContextPanelOpen] = useState(true);
   const [contextAutoClosed, setContextAutoClosed] = useState(false);
   const [activityPanelOpen, setActivityPanelOpen] = useState(false);
+  const [ticketPanelOpen, setTicketPanelOpen] = useState(false);
+  const [ticketMessage, setTicketMessage] = useState("");
+  const [ticketSubmitting, setTicketSubmitting] = useState(false);
   const [recordingContext, setRecordingContext] = useState<RecordingContext>({
     accent: "",
     state: "",
@@ -1373,6 +1426,7 @@ function ScriptRecorder({
   const safeScriptIndex = Math.min(scriptIndex, Math.max(scripts.length - 1, 0));
   const script = scripts[safeScriptIndex];
   const segments = script ? getScriptSegments(script) : [];
+  const activeLineText = segments[activeLineIndex]?.text ?? "";
   const taskProgress = buildReaderTaskProgress(scripts, myRecordings);
   const currentTask = script ? taskProgress.tasks.find((task) => task.scriptId === script.id) : undefined;
   const recordingContextComplete = isRecordingContextComplete(recordingContext);
@@ -1414,6 +1468,7 @@ function ScriptRecorder({
   const contextToggleLabel = contextPanelOpen ? "Hide context" : "Show context";
   const contextToggleTitle = recordingContextComplete ? contextToggleLabel : `${contextToggleLabel} before recording`;
   const activityToggleLabel = activityPanelOpen ? "Hide activity" : "Show activity";
+  const ticketToggleLabel = ticketPanelOpen ? "Hide script issue form" : "Report script issue";
 
   useEffect(() => {
     initialTaskIndexSetRef.current = false;
@@ -1778,6 +1833,7 @@ function ScriptRecorder({
     setElapsedSeconds(0);
     setUploadError("");
     setContextPanelOpen(false);
+    resetScriptTicketPanel();
     if (openedNextTask) {
       setScriptIndex(nextScriptIndex);
       setActiveLineIndex(0);
@@ -1822,9 +1878,15 @@ function ScriptRecorder({
     return window.confirm(`${UNSAVED_RECORDING_MESSAGE} Leave without saving it?`);
   }
 
+  function resetScriptTicketPanel() {
+    setTicketPanelOpen(false);
+    setTicketMessage("");
+  }
+
   function changeScriptIndex(nextIndex: number) {
     if (!canLeaveUnsavedRecording()) return;
     discardRecording();
+    resetScriptTicketPanel();
     setScriptIndex(nextIndex);
   }
 
@@ -1833,6 +1895,28 @@ function ScriptRecorder({
     if (!contextAutoClosed && isRecordingContextComplete(nextContext)) {
       setContextPanelOpen(false);
       setContextAutoClosed(true);
+    }
+  }
+
+  async function submitScriptTicket() {
+    if (!script || !ticketMessage.trim()) return;
+
+    setTicketSubmitting(true);
+    setError("");
+    setNotice("");
+    try {
+      await createScriptTicket(session.token, {
+        script_id: script.id,
+        message: ticketMessage.trim(),
+        line_text: activeLineText,
+      });
+      setTicketMessage("");
+      setTicketPanelOpen(false);
+      setNotice("Ticket sent to admin.");
+    } catch (ticketError) {
+      setError(ticketError instanceof Error ? ticketError.message : "Could not submit ticket.");
+    } finally {
+      setTicketSubmitting(false);
     }
   }
 
@@ -1917,6 +2001,16 @@ function ScriptRecorder({
                   <BookOpen size={16} />
                 </button>
                 <button
+                  className={ticketPanelOpen ? "reader-utility-button script-ticket-toggle active" : "reader-utility-button script-ticket-toggle"}
+                  type="button"
+                  onClick={() => setTicketPanelOpen((isOpen) => !isOpen)}
+                  aria-label={ticketToggleLabel}
+                  aria-expanded={ticketPanelOpen}
+                  title="Report script issue"
+                >
+                  <MessageSquareWarning size={16} />
+                </button>
+                <button
                   className={autoScroll ? "reader-utility-button auto-scroll-toggle active" : "reader-utility-button auto-scroll-toggle"}
                   type="button"
                   onClick={() => setAutoScroll((enabled) => !enabled)}
@@ -1936,6 +2030,16 @@ function ScriptRecorder({
                   <Bell size={16} />
                 </button>
               </div>
+              {ticketPanelOpen ? (
+                <ScriptTicketPanel
+                  message={ticketMessage}
+                  lineText={activeLineText}
+                  submitting={ticketSubmitting}
+                  onChange={setTicketMessage}
+                  onClose={() => setTicketPanelOpen(false)}
+                  onSubmit={submitScriptTicket}
+                />
+              ) : null}
               <div className="teleprompter-frame">
                 <div className="teleprompter-focus" aria-hidden="true" />
                 <div
@@ -2098,6 +2202,61 @@ function UploadProgress({ progress }: { progress: number }) {
       <strong>{uploadPercent}%</strong>
       <progress value={uploadPercent} max={100} aria-label="Upload progress" />
     </div>
+  );
+}
+
+function ScriptTicketPanel({
+  message,
+  lineText,
+  submitting,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  message: string;
+  lineText: string;
+  submitting: boolean;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => Promise<void> | void;
+}) {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void onSubmit();
+  }
+
+  return (
+    <form className="script-ticket-panel" onSubmit={handleSubmit}>
+      <div className="script-ticket-head">
+        <span>Report script issue</span>
+        <button className="icon-action-button" type="button" onClick={onClose} aria-label="Close report form">
+          <X size={15} />
+        </button>
+      </div>
+      {lineText ? (
+        <blockquote>
+          <span>Current line</span>
+          {lineText}
+        </blockquote>
+      ) : null}
+      <label>
+        <span>What looks wrong?</span>
+        <textarea
+          value={message}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Example: wrong name, typo, missing word, unclear sentence"
+          rows={4}
+        />
+      </label>
+      <div className="script-ticket-actions">
+        <button className="text-button" type="button" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="primary-button" type="submit" disabled={submitting || !message.trim()}>
+          {submitting ? "Sending" : "Send ticket"}
+        </button>
+      </div>
+    </form>
   );
 }
 

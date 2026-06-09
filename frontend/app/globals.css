@@ -855,14 +855,16 @@ p {
 
 .simple-list,
 .script-list,
-.recording-table {
+.recording-table,
+.ticket-list {
   display: grid;
   border-top: 1px solid var(--line);
 }
 
 .list-row,
 .script-row,
-.recording-row {
+.recording-row,
+.ticket-row {
   display: grid;
   gap: 0.9rem;
   align-items: center;
@@ -876,6 +878,66 @@ p {
 
 .script-row {
   grid-template-columns: minmax(12rem, 0.45fr) minmax(16rem, 1fr) auto;
+}
+
+.ticket-row {
+  align-items: start;
+  gap: 0.65rem;
+}
+
+.ticket-row-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.ticket-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.6rem;
+  padding: 0 0.65rem;
+  color: #8f153f;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: capitalize;
+  background: #fff3f7;
+  border: 1px solid rgba(143, 21, 63, 0.14);
+  border-radius: 999px;
+}
+
+.ticket-row p {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.45;
+}
+
+.ticket-row blockquote {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  color: var(--body);
+  line-height: 1.4;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.ticket-row blockquote span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.ticket-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .script-row div,
@@ -1667,6 +1729,12 @@ p {
   border-color: rgba(58, 9, 117, 0.2);
 }
 
+.script-ticket-toggle.active {
+  color: #8f153f;
+  background: #fff3f7;
+  border-color: rgba(143, 21, 63, 0.18);
+}
+
 .reader-utility-rail {
   position: absolute;
   top: clamp(7.2rem, 16vh, 9.4rem);
@@ -1694,6 +1762,73 @@ p {
   color: var(--ink);
   background: #fff;
   border-color: rgba(19, 16, 45, 0.2);
+}
+
+.script-ticket-panel {
+  position: absolute;
+  top: clamp(7.2rem, 16vh, 9.4rem);
+  right: clamp(3.4rem, 2.8vw, 4.2rem);
+  z-index: 8;
+  display: grid;
+  gap: 0.75rem;
+  width: min(22rem, calc(100vw - 5.5rem));
+  padding: 0.9rem;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(19, 16, 45, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 24px 56px rgba(19, 16, 45, 0.14);
+  backdrop-filter: blur(18px);
+}
+
+.script-ticket-head,
+.script-ticket-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.script-ticket-head > span {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.script-ticket-panel blockquote {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  color: var(--body);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.script-ticket-panel blockquote span,
+.script-ticket-panel label span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.script-ticket-panel label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.script-ticket-panel textarea {
+  width: 100%;
+  min-height: 6rem;
+  resize: vertical;
+}
+
+.script-ticket-actions .primary-button {
+  min-height: 2.45rem;
+  padding: 0 1rem;
 }
 
 .script-step-strip {
@@ -2539,7 +2674,7 @@ progress::-webkit-progress-value {
   }
 
   .admin-rail {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     min-height: 0;
   }
 
@@ -2550,6 +2685,7 @@ progress::-webkit-progress-value {
   .context-grid,
   .script-row,
   .recording-row,
+  .ticket-row-head,
   .audio-detail-grid {
     grid-template-columns: 1fr;
   }
@@ -2564,7 +2700,8 @@ progress::-webkit-progress-value {
   }
 
   .script-list,
-  .recording-table {
+  .recording-table,
+  .ticket-list {
     max-height: none;
   }
 
@@ -2656,6 +2793,12 @@ progress::-webkit-progress-value {
     width: 2.15rem;
     height: 2.15rem;
     min-height: 2.15rem;
+  }
+
+  .script-ticket-panel {
+    top: 6.35rem;
+    right: 2.8rem;
+    width: min(20rem, calc(100vw - 3.6rem));
   }
 
   .script-copy {
