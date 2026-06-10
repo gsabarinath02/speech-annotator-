@@ -32,7 +32,17 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { CSSProperties, FormEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import {
+  CSSProperties,
+  FormEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   ApiError,
@@ -73,8 +83,16 @@ import {
   updateRecordingReview,
   updateScript,
 } from "../lib/api";
+import {
+  buildWaveformPeaks,
+  MistakeMarker,
+  removeFloat32Range,
+  replaceFloat32Range,
+  sliceFloat32Range,
+  WaveformPeak,
+} from "../lib/audio/editing";
 import { analyzeRecordingQuality, classifyLiveInputLevel, LiveInputLevel } from "../lib/audio/quality";
-import { TrainingAudioRecorder, TrainingRecording } from "../lib/audio/recorder";
+import { createTrainingRecordingFromSamples, TrainingAudioRecorder, TrainingRecording } from "../lib/audio/recorder";
 import {
   buildReaderTaskProgress,
   firstActionableScriptIndex,
@@ -1390,6 +1408,8 @@ function ScriptRecorder({
     "idle",
   );
   const [recording, setRecording] = useState<TrainingRecording | null>(null);
+  const [mistakeMarkers, setMistakeMarkers] = useState<MistakeMarker[]>([]);
+  const [beepToast, setBeepToast] = useState("");
   const [saveResult, setSaveResult] = useState<{ filename: string; sha256: string; takeNumber?: number } | null>(null);
   const [countdown, setCountdown] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -1414,7 +1434,15 @@ function ScriptRecorder({
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState("");
   const [backgroundSave, setBackgroundSave] = useState<BackgroundSave | null>(null);
+  const [repairPanelOpen, setRepairPanelOpen] = useState(false);
+  const [repairStartSeconds, setRepairStartSeconds] = useState("0.0");
+  const [repairEndSeconds, setRepairEndSeconds] = useState("");
+  const [repairRecordingState, setRepairRecordingState] = useState<"idle" | "recording">("idle");
+  const [repairElapsedSeconds, setRepairElapsedSeconds] = useState(0);
+  const [replacementRecording, setReplacementRecording] = useState<TrainingRecording | null>(null);
   const recorderRef = useRef<TrainingAudioRecorder | null>(null);
+  const repairRecorderRef = useRef<TrainingAudioRecorder | null>(null);
+  const reviewAudioRef = useRef<HTMLAudioElement | null>(null);
   const backgroundSaveRef = useRef<BackgroundSave | null>(null);
   const initialTaskIndexSetRef = useRef(false);
   const scriptScrollRef = useRef<HTMLDivElement | null>(null);
@@ -1422,6 +1450,7 @@ function ScriptRecorder({
   const programmaticScrollRef = useRef(false);
   const manualScrollPauseUntilRef = useRef(0);
   const activeLineUpdateFrameRef = useRef<number | null>(null);
+  const beepToastTimerRef = useRef<number | null>(null);
 
   const safeScriptIndex = Math.min(scriptIndex, Math.max(scripts.length - 1, 0));
   const script = scripts[safeScriptIndex];
@@ -1628,6 +1657,25 @@ function ScriptRecorder({
     [updateBackgroundSave, uploadBackgroundSave],
   );
 
+  const clearBeepToast = useCallback(() => {
+    if (beepToastTimerRef.current) {
+      window.clearTimeout(beepToastTimerRef.current);
+      beepToastTimerRef.current = null;
+    }
+    setBeepToast("");
+  }, []);
+
+  const showBeepToast = useCallback((message: string) => {
+    if (beepToastTimerRef.current) {
+      window.clearTimeout(beepToastTimerRef.current);
+    }
+    setBeepToast(message);
+    beepToastTimerRef.current = window.setTimeout(() => {
+      setBeepToast("");
+      beepToastTimerRef.current = null;
+    }, 1500);
+  }, []);
+
   const startRecording = useCallback(async () => {
     setError("");
     setNotice("");
@@ -1635,6 +1683,14 @@ function ScriptRecorder({
     setUploadError("");
     setUploadProgress(0);
     setElapsedSeconds(0);
+    setMistakeMarkers([]);
+    clearBeepToast();
+    setRepairPanelOpen(false);
+    setRepairElapsedSeconds(0);
+    setReplacementRecording((currentReplacement) => {
+      if (currentReplacement?.url) URL.revokeObjectURL(currentReplacement.url);
+      return null;
+    });
     manualScrollPauseUntilRef.current = 0;
     setLiveInputLevel(classifyLiveInputLevel(null));
     if (recording?.url) URL.revokeObjectURL(recording.url);
@@ -1649,7 +1705,7 @@ function ScriptRecorder({
       setError(recordingError instanceof Error ? recordingError.message : "Microphone could not start.");
       setRecordingState("idle");
     }
-  }, [recording, setError, setNotice]);
+  }, [clearBeepToast, recording, setError, setNotice]);
 
   const stopRecording = useCallback(async () => {
     if (!recorderRef.current) return;
@@ -1657,6 +1713,8 @@ function ScriptRecorder({
       const nextRecording = await recorderRef.current.stop();
       recorderRef.current = null;
       setRecording(nextRecording);
+      setMistakeMarkers(nextRecording.mistakeMarkers);
+      clearBeepToast();
       setRecordingState("review");
       if (script) {
         startBackgroundUpload(nextRecording, script, safeScriptIndex);
@@ -1665,7 +1723,7 @@ function ScriptRecorder({
       setError(recordingError instanceof Error ? recordingError.message : "Recording could not stop.");
       setRecordingState("idle");
     }
-  }, [safeScriptIndex, script, setError, startBackgroundUpload]);
+  }, [clearBeepToast, safeScriptIndex, script, setError, startBackgroundUpload]);
 
   const beginCountdown = useCallback(() => {
     if (
@@ -1707,6 +1765,13 @@ function ScriptRecorder({
   }, [recordingState]);
 
   useEffect(() => {
+    if (repairRecordingState !== "recording") return undefined;
+
+    const timer = window.setInterval(() => setRepairElapsedSeconds((seconds) => seconds + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [repairRecordingState]);
+
+  useEffect(() => {
     const scrollElement = scriptScrollRef.current;
     if (!scrollElement) return undefined;
 
@@ -1746,6 +1811,10 @@ function ScriptRecorder({
       if (activeLineUpdateFrameRef.current) {
         window.cancelAnimationFrame(activeLineUpdateFrameRef.current);
       }
+      if (beepToastTimerRef.current) {
+        window.clearTimeout(beepToastTimerRef.current);
+      }
+      repairRecorderRef.current?.cancel().catch(() => undefined);
     };
   }, []);
 
@@ -1802,15 +1871,36 @@ function ScriptRecorder({
     }
   }
 
+  function markMistake() {
+    const marker = recorderRef.current?.insertMistakeBeep();
+    if (!marker) return;
+    setMistakeMarkers((currentMarkers) => [...currentMarkers, marker]);
+    showBeepToast("Beep added");
+  }
+
+  function clearReplacementRecording() {
+    if (replacementRecording?.url) URL.revokeObjectURL(replacementRecording.url);
+    setReplacementRecording(null);
+  }
+
   function discardRecording() {
+    repairRecorderRef.current?.cancel().catch(() => undefined);
+    repairRecorderRef.current = null;
     if (recording?.url) URL.revokeObjectURL(recording.url);
+    if (replacementRecording?.url) URL.revokeObjectURL(replacementRecording.url);
     setRecording(null);
+    setMistakeMarkers([]);
+    clearBeepToast();
     setRecordingState("idle");
     setSaveResult(null);
     setUploadError("");
     setUploadProgress(0);
     setCountdown(0);
     setElapsedSeconds(0);
+    setRepairPanelOpen(false);
+    setRepairRecordingState("idle");
+    setRepairElapsedSeconds(0);
+    setReplacementRecording(null);
   }
 
   function advanceAfterBackgroundSaveStarted(job: BackgroundSave) {
@@ -1823,6 +1913,8 @@ function ScriptRecorder({
     updateBackgroundSave((current) => (current?.id === job.id ? { ...current, shouldAdvance: true } : current));
     if (recording.url) URL.revokeObjectURL(recording.url);
     setRecording(null);
+    setMistakeMarkers([]);
+    clearBeepToast();
     setRecordingState("idle");
     setSaveResult(
       job.status === "saved" && !openedNextTask && job.response
@@ -1834,6 +1926,9 @@ function ScriptRecorder({
     setUploadError("");
     setContextPanelOpen(false);
     resetScriptTicketPanel();
+    setRepairPanelOpen(false);
+    setRepairElapsedSeconds(0);
+    clearReplacementRecording();
     if (openedNextTask) {
       setScriptIndex(nextScriptIndex);
       setActiveLineIndex(0);
@@ -1898,6 +1993,177 @@ function ScriptRecorder({
     }
   }
 
+  function openAudioEditor(targetRecording: TrainingRecording) {
+    const currentStart = Number(repairStartSeconds);
+    const safeStart = Number.isFinite(currentStart) ? Math.max(0, Math.min(currentStart, targetRecording.durationSeconds)) : 0;
+    const currentEnd = Number(repairEndSeconds);
+    const defaultEnd = Math.min(targetRecording.durationSeconds, safeStart + Math.min(6, Math.max(targetRecording.durationSeconds, 0.5)));
+    const safeEnd =
+      Number.isFinite(currentEnd) && currentEnd > safeStart
+        ? Math.min(currentEnd, targetRecording.durationSeconds)
+        : Math.max(defaultEnd, Math.min(targetRecording.durationSeconds, safeStart + 0.5));
+    setRepairStartSeconds(safeStart.toFixed(1));
+    setRepairEndSeconds(safeEnd.toFixed(1));
+    setRepairPanelOpen(true);
+  }
+
+  function setRepairPoint(point: "start" | "end") {
+    const currentTime = reviewAudioRef.current?.currentTime ?? 0;
+    const value = currentTime.toFixed(1);
+    if (point === "start") {
+      setRepairStartSeconds(value);
+    } else {
+      setRepairEndSeconds(value);
+    }
+  }
+
+  function getValidEditorSelection(targetRecording: TrainingRecording) {
+    const startSeconds = Number(repairStartSeconds);
+    const endSeconds = Number(repairEndSeconds);
+    if (
+      !Number.isFinite(startSeconds) ||
+      !Number.isFinite(endSeconds) ||
+      startSeconds < 0 ||
+      endSeconds <= startSeconds ||
+      endSeconds > targetRecording.durationSeconds + 0.05
+    ) {
+      setError("Choose a valid start and end time in the editor.");
+      return null;
+    }
+    return {
+      startSeconds: Math.max(0, Math.min(startSeconds, targetRecording.durationSeconds)),
+      endSeconds: Math.max(0, Math.min(endSeconds, targetRecording.durationSeconds)),
+    };
+  }
+
+  async function startReplacementRecording() {
+    setError("");
+    setNotice("");
+    clearReplacementRecording();
+    setRepairElapsedSeconds(0);
+    try {
+      const recorder = new TrainingAudioRecorder();
+      repairRecorderRef.current = recorder;
+      await recorder.start();
+      setRepairRecordingState("recording");
+    } catch (repairError) {
+      setError(repairError instanceof Error ? repairError.message : "Replacement recording could not start.");
+      setRepairRecordingState("idle");
+    }
+  }
+
+  async function stopReplacementRecording() {
+    if (!repairRecorderRef.current) return;
+    try {
+      const replacement = await repairRecorderRef.current.stop();
+      repairRecorderRef.current = null;
+      setReplacementRecording(replacement);
+      setRepairRecordingState("idle");
+    } catch (repairError) {
+      setError(repairError instanceof Error ? repairError.message : "Replacement recording could not stop.");
+      setRepairRecordingState("idle");
+    }
+  }
+
+  function applyReplacement() {
+    if (!recording || !replacementRecording) return;
+
+    const selection = getValidEditorSelection(recording);
+    if (!selection) return;
+
+    const editedSamples = replaceFloat32Range({
+      source: recording.samples,
+      replacement: replacementRecording.samples,
+      sampleRate: recording.sampleRate,
+      startSeconds: selection.startSeconds,
+      endSeconds: selection.endSeconds,
+    });
+    const repairedMarkers = repairMistakeMarkers(
+      recording.mistakeMarkers,
+      selection.startSeconds,
+      selection.endSeconds,
+      replacementRecording.durationSeconds,
+    );
+    const repairedRecording = createTrainingRecordingFromSamples({
+      samples: editedSamples,
+      sampleRate: recording.sampleRate,
+      mistakeMarkers: repairedMarkers,
+    });
+    if (recording.url) URL.revokeObjectURL(recording.url);
+    if (replacementRecording.url) URL.revokeObjectURL(replacementRecording.url);
+    setRecording(repairedRecording);
+    setMistakeMarkers(repairedMarkers);
+    setReplacementRecording(null);
+    setRepairPanelOpen(false);
+    updateBackgroundSave(null);
+    setUploadProgress(0);
+    setUploadError("");
+    setSaveResult(null);
+    setNotice("Section replaced. Save will upload the corrected take.");
+  }
+
+  function applyCropToSelection() {
+    if (!recording) return;
+
+    const selection = getValidEditorSelection(recording);
+    if (!selection) return;
+
+    const croppedSamples = sliceFloat32Range({
+      source: recording.samples,
+      sampleRate: recording.sampleRate,
+      startSeconds: selection.startSeconds,
+      endSeconds: selection.endSeconds,
+    });
+    const croppedRecording = createTrainingRecordingFromSamples({
+      samples: croppedSamples,
+      sampleRate: recording.sampleRate,
+      mistakeMarkers: cropMistakeMarkers(recording.mistakeMarkers, selection.startSeconds, selection.endSeconds),
+    });
+    if (recording.url) URL.revokeObjectURL(recording.url);
+    clearReplacementRecording();
+    setRecording(croppedRecording);
+    setMistakeMarkers(croppedRecording.mistakeMarkers);
+    setRepairStartSeconds("0.0");
+    setRepairEndSeconds(croppedRecording.durationSeconds.toFixed(1));
+    setRepairPanelOpen(false);
+    updateBackgroundSave(null);
+    setUploadProgress(0);
+    setUploadError("");
+    setSaveResult(null);
+    setNotice("Recording cropped to the selected portion.");
+  }
+
+  function removeSelectedAudio() {
+    if (!recording) return;
+
+    const selection = getValidEditorSelection(recording);
+    if (!selection) return;
+
+    const editedSamples = removeFloat32Range({
+      source: recording.samples,
+      sampleRate: recording.sampleRate,
+      startSeconds: selection.startSeconds,
+      endSeconds: selection.endSeconds,
+    });
+    const repairedMarkers = repairMistakeMarkers(recording.mistakeMarkers, selection.startSeconds, selection.endSeconds, 0);
+    const editedRecording = createTrainingRecordingFromSamples({
+      samples: editedSamples,
+      sampleRate: recording.sampleRate,
+      mistakeMarkers: repairedMarkers,
+    });
+    if (recording.url) URL.revokeObjectURL(recording.url);
+    clearReplacementRecording();
+    setRecording(editedRecording);
+    setMistakeMarkers(repairedMarkers);
+    setRepairEndSeconds(Math.min(editedRecording.durationSeconds, Number(repairStartSeconds) + 0.5).toFixed(1));
+    setRepairPanelOpen(false);
+    updateBackgroundSave(null);
+    setUploadProgress(0);
+    setUploadError("");
+    setSaveResult(null);
+    setNotice("Selected portion removed. Save will upload the edited take.");
+  }
+
   async function submitScriptTicket() {
     if (!script || !ticketMessage.trim()) return;
 
@@ -1933,6 +2199,12 @@ function ScriptRecorder({
                   <span>Recording starts in</span>
                   <strong>{countdown}</strong>
                 </div>
+              </div>
+            ) : null}
+            {beepToast ? (
+              <div className="beep-toast" role="status" aria-live="polite">
+                <Check size={15} />
+                <span>{beepToast}</span>
               </div>
             ) : null}
             <article className="script-reader" aria-label="Recording script">
@@ -2138,17 +2410,28 @@ function ScriptRecorder({
                 <div className="dock-timer">{captureIsActive ? formatDuration(elapsedSeconds) : "00:00.0"}</div>
                 <div className="dock-actions">
                   {captureIsActive ? (
-                    <button
-                      className={`pause-resume-button ${recordingState === "paused" ? "resume" : "pause"}`}
-                      type="button"
-                      onClick={recordingState === "paused" ? resumeRecording : pauseRecording}
-                      aria-label={recordingState === "paused" ? "Resume recording" : "Pause recording"}
-                    >
-                      {recordingState === "paused" ? <Play size={17} /> : <Pause size={17} />}
-                      <span>{recordingState === "paused" ? "Resume" : "Pause"}</span>
-                    </button>
+                    <div className="mistake-tools">
+                      <button
+                        className={`pause-resume-button ${recordingState === "paused" ? "resume" : "pause"}`}
+                        type="button"
+                        onClick={recordingState === "paused" ? resumeRecording : pauseRecording}
+                        aria-label={recordingState === "paused" ? "Resume recording" : "Pause recording"}
+                      >
+                        {recordingState === "paused" ? <Play size={17} /> : <Pause size={17} />}
+                        <span>{recordingState === "paused" ? "Resume" : "Pause"}</span>
+                      </button>
+                      <button
+                        className="mistake-marker-button"
+                        type="button"
+                        onClick={markMistake}
+                        disabled={recordingState !== "recording"}
+                        title="Insert a short beep where the mistake happened, then continue with the corrected words."
+                      >
+                        <MessageSquareWarning size={16} /> Beep
+                      </button>
+                    </div>
                   ) : null}
-                  {recording || recordingState === "countdown" ? (
+                  {!captureIsActive && (recording || recordingState === "countdown") ? (
                     <button
                       className="icon-action-button"
                       type="button"
@@ -2158,14 +2441,16 @@ function ScriptRecorder({
                       <RotateCcw size={16} />
                     </button>
                   ) : null}
-                  <button
-                    className="primary-button save-take-button"
-                    type="button"
-                    onClick={saveCurrentRecording}
-                    disabled={!recording || recordingState === "saving" || hasBlockingQualityWarning}
-                  >
-                    {saveButtonLabel}
-                  </button>
+                  {!captureIsActive ? (
+                    <button
+                      className="primary-button save-take-button"
+                      type="button"
+                      onClick={saveCurrentRecording}
+                      disabled={!recording || recordingState === "saving" || hasBlockingQualityWarning || repairRecordingState === "recording"}
+                    >
+                      {saveButtonLabel}
+                    </button>
+                  ) : null}
                 </div>
               </div>
               <div className="dock-status">
@@ -2174,8 +2459,16 @@ function ScriptRecorder({
               </div>
               {recording || saveResult ? (
                 <div className="recording-review-panel">
-                  {recording ? <audio className="review-audio" controls src={recording.url} /> : null}
+                  {recording ? <audio className="review-audio" controls src={recording.url} ref={reviewAudioRef} /> : null}
                   {recording ? <QualityWarnings warnings={qualityWarnings} /> : null}
+                  {recording ? (
+                    <div className="audio-editor-launch">
+                      <button className="section-repair-toggle" type="button" onClick={() => openAudioEditor(recording)}>
+                        <RotateCcw size={15} /> Open editor
+                      </button>
+                      <span>Select, replace, crop, or remove a portion before saving.</span>
+                    </div>
+                  ) : null}
                   {activeBackgroundSave?.status === "uploading" ? <UploadProgress progress={activeBackgroundSave.progress} /> : null}
                   {uploadError ? <div className="upload-error">{uploadError}</div> : null}
                   {saveResult ? (
@@ -2184,6 +2477,31 @@ function ScriptRecorder({
                 </div>
               ) : null}
             </aside>
+            {recording && repairPanelOpen ? (
+              <AudioEditorModal
+                recording={recording}
+                mistakeMarkers={mistakeMarkers}
+                startSeconds={repairStartSeconds}
+                endSeconds={repairEndSeconds}
+                replacementRecording={replacementRecording}
+                recordingState={repairRecordingState}
+                elapsedSeconds={repairElapsedSeconds}
+                onClose={() => setRepairPanelOpen(false)}
+                onSetStart={setRepairStartSeconds}
+                onSetEnd={setRepairEndSeconds}
+                onSelectRange={(start, end) => {
+                  setRepairStartSeconds(start.toFixed(1));
+                  setRepairEndSeconds(end.toFixed(1));
+                }}
+                onUseStart={() => setRepairPoint("start")}
+                onUseEnd={() => setRepairPoint("end")}
+                onStartReplacement={startReplacementRecording}
+                onStopReplacement={stopReplacementRecording}
+                onApplyReplacement={applyReplacement}
+                onApplyCrop={applyCropToSelection}
+                onRemoveSelection={removeSelectedAudio}
+              />
+            ) : null}
           </div>
 
           <progress className="sr-progress" value={progress} max={100} aria-label="Script progress" />
@@ -2258,6 +2576,476 @@ function ScriptTicketPanel({
       </div>
     </form>
   );
+}
+
+function AudioEditorModal({
+  recording,
+  mistakeMarkers,
+  startSeconds,
+  endSeconds,
+  replacementRecording,
+  recordingState,
+  elapsedSeconds,
+  onClose,
+  onSetStart,
+  onSetEnd,
+  onSelectRange,
+  onUseStart,
+  onUseEnd,
+  onStartReplacement,
+  onStopReplacement,
+  onApplyReplacement,
+  onApplyCrop,
+  onRemoveSelection,
+}: {
+  recording: TrainingRecording;
+  mistakeMarkers: MistakeMarker[];
+  startSeconds: string;
+  endSeconds: string;
+  replacementRecording: TrainingRecording | null;
+  recordingState: "idle" | "recording";
+  elapsedSeconds: number;
+  onClose: () => void;
+  onSetStart: (value: string) => void;
+  onSetEnd: (value: string) => void;
+  onSelectRange: (startSeconds: number, endSeconds: number) => void;
+  onUseStart: () => void;
+  onUseEnd: () => void;
+  onStartReplacement: () => Promise<void> | void;
+  onStopReplacement: () => Promise<void> | void;
+  onApplyReplacement: () => void;
+  onApplyCrop: () => void;
+  onRemoveSelection: () => void;
+}) {
+  const selectedRange = useMemo(
+    () => resolveEditorSelection(recording, startSeconds, endSeconds),
+    [endSeconds, recording, startSeconds],
+  );
+  const selectedRangeKey = selectedRange
+    ? `${recording.frames}:${selectedRange.startSeconds.toFixed(3)}-${selectedRange.endSeconds.toFixed(3)}`
+    : "none";
+  const selectedSamples = useMemo(
+    () =>
+      selectedRange
+        ? sliceFloat32Range({
+            source: recording.samples,
+            sampleRate: recording.sampleRate,
+            startSeconds: selectedRange.startSeconds,
+            endSeconds: selectedRange.endSeconds,
+          })
+        : null,
+    [recording, selectedRange],
+  );
+  const editedPreviewSamples = useMemo(
+    () =>
+      selectedRange && replacementRecording
+        ? replaceFloat32Range({
+            source: recording.samples,
+            replacement: replacementRecording.samples,
+            sampleRate: recording.sampleRate,
+            startSeconds: selectedRange.startSeconds,
+            endSeconds: selectedRange.endSeconds,
+          })
+        : null,
+    [recording, replacementRecording, selectedRange],
+  );
+  const selectedPreviewUrl = useAudioPreviewUrl(selectedSamples, recording.sampleRate);
+  const editedPreviewUrl = useAudioPreviewUrl(editedPreviewSamples, recording.sampleRate);
+  const [advancedTimingOpen, setAdvancedTimingOpen] = useState(false);
+  const [previewMode, setPreviewMode] = useState<"full" | "before" | "after">("full");
+  const compareAudioRef = useRef<HTMLAudioElement | null>(null);
+  const hasReplacement = Boolean(replacementRecording);
+  const hasAfterPreview = Boolean(editedPreviewUrl);
+  const activePreviewUrl =
+    previewMode === "before"
+      ? selectedPreviewUrl || recording.url
+      : previewMode === "after"
+        ? editedPreviewUrl || recording.url
+        : recording.url;
+  const activePreviewLabel = previewMode === "before" ? "Before" : previewMode === "after" ? "After" : "Full recording";
+
+  function playPreview(mode: "full" | "before" | "after") {
+    if (mode === "before" && !selectedPreviewUrl) return;
+    if (mode === "after" && !editedPreviewUrl) return;
+    setPreviewMode(mode);
+    window.requestAnimationFrame(() => {
+      const audio = compareAudioRef.current;
+      if (!audio) return;
+      audio.currentTime = 0;
+      void audio.play().catch(() => undefined);
+    });
+  }
+
+  function nudgeSelection(edge: "start" | "end", deltaSeconds: number) {
+    if (!selectedRange) return;
+    const minimumLength = 0.1;
+    const durationSeconds = recording.durationSeconds;
+    if (edge === "start") {
+      const nextStart = Math.max(0, Math.min(selectedRange.startSeconds + deltaSeconds, selectedRange.endSeconds - minimumLength));
+      onSelectRange(nextStart, selectedRange.endSeconds);
+      return;
+    }
+
+    const nextEnd = Math.min(durationSeconds, Math.max(selectedRange.endSeconds + deltaSeconds, selectedRange.startSeconds + minimumLength));
+    onSelectRange(selectedRange.startSeconds, nextEnd);
+  }
+
+  return (
+    <div className="audio-editor-backdrop" role="presentation">
+      <section className="audio-editor-modal" role="dialog" aria-modal="true" aria-labelledby="audio-editor-title">
+        <div className="audio-editor-head">
+          <div>
+            <span>Speech editor</span>
+            <h2 id="audio-editor-title">Fix a mistake</h2>
+            <p>Follow the steps below. The waveform is still available, but you usually only need the buttons.</p>
+          </div>
+          <button className="icon-action-button" type="button" onClick={onClose} aria-label="Close speech editor">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="guided-editor-steps">
+          <section className="editor-step">
+            <div className="editor-step-head">
+              <span>1</span>
+              <div>
+                <h3>Choose mistake</h3>
+                <p>Click the beep marker you added while recording, or drag on the waveform.</p>
+              </div>
+            </div>
+            {mistakeMarkers.length ? (
+              <div className="mistake-marker-list guided">
+                {mistakeMarkers.map((marker, index) => (
+                  <button
+                    className="mistake-marker-chip"
+                    type="button"
+                    key={marker.id}
+                    onClick={() => {
+                      const start = Math.max(0, marker.seconds - 2);
+                      const end = Math.min(recording.durationSeconds, marker.seconds + 4);
+                      onSelectRange(start, end);
+                    }}
+                  >
+                    <strong>Mistake {index + 1}</strong>
+                    <span>{formatDuration(Math.round(marker.seconds))}</span>
+                    <em>Fix this part</em>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <span className="editor-empty-hint">No beep markers yet. Drag on the waveform to select the part to fix.</span>
+            )}
+          </section>
+
+          <section className="editor-step">
+            <div className="editor-step-head">
+              <span>2</span>
+              <div>
+                <h3>Listen to the selected part</h3>
+                <p>Adjust the selected range if it starts too early or ends too late.</p>
+              </div>
+            </div>
+            <WaveformSelector
+              recording={recording}
+              startSeconds={selectedRange?.startSeconds ?? 0}
+              endSeconds={selectedRange?.endSeconds ?? Math.min(recording.durationSeconds, 1)}
+              onChange={onSelectRange}
+            />
+            <div className="editor-selection-summary">
+              <strong>{selectedRange ? `${formatDuration(Math.round(selectedRange.durationSeconds))} selected` : "No selection"}</strong>
+              <span>
+                {selectedRange
+                  ? `${selectedRange.startSeconds.toFixed(1)}s to ${selectedRange.endSeconds.toFixed(1)}s`
+                  : "Drag across the waveform to choose a portion."}
+              </span>
+            </div>
+            <div className="quick-adjust-grid">
+              <button className="secondary-button" type="button" onClick={() => nudgeSelection("start", -0.5)} disabled={!selectedRange}>
+                Move start earlier
+              </button>
+              <button className="secondary-button" type="button" onClick={() => nudgeSelection("start", 0.5)} disabled={!selectedRange}>
+                Move start later
+              </button>
+              <button className="secondary-button" type="button" onClick={() => nudgeSelection("end", -0.5)} disabled={!selectedRange}>
+                Move end earlier
+              </button>
+              <button className="secondary-button" type="button" onClick={() => nudgeSelection("end", 0.5)} disabled={!selectedRange}>
+                Move end later
+              </button>
+            </div>
+            <button className="text-button advanced-toggle" type="button" onClick={() => setAdvancedTimingOpen((isOpen) => !isOpen)}>
+              Advanced timing
+            </button>
+            {advancedTimingOpen ? (
+              <div className="advanced-timing-panel">
+                <label>
+                  <span>Start</span>
+                  <input type="number" min="0" step="0.1" value={startSeconds} onChange={(event) => onSetStart(event.target.value)} />
+                  <button className="text-button" type="button" onClick={onUseStart}>
+                    Use player time
+                  </button>
+                </label>
+                <label>
+                  <span>End</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    max={recording.durationSeconds.toFixed(1)}
+                    value={endSeconds}
+                    onChange={(event) => onSetEnd(event.target.value)}
+                  />
+                  <button className="text-button" type="button" onClick={onUseEnd}>
+                    Use player time
+                  </button>
+                </label>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="editor-step">
+            <div className="editor-step-head">
+              <span>3</span>
+              <div>
+                <h3>Re-record only this part</h3>
+                <p>Record the corrected words for the selected range.</p>
+              </div>
+            </div>
+            <div className="guided-action-row">
+              <button
+                className={recordingState === "recording" ? "secondary-button danger" : "primary-button"}
+                type="button"
+                onClick={recordingState === "recording" ? onStopReplacement : onStartReplacement}
+                disabled={!selectedRange && recordingState !== "recording"}
+              >
+                {recordingState === "recording" ? <Square size={15} /> : <Mic size={15} />}
+                {recordingState === "recording" ? `Stop replacement ${formatDuration(elapsedSeconds)}` : "Re-record this part"}
+              </button>
+              <button className="primary-button" type="button" onClick={onApplyReplacement} disabled={!hasReplacement}>
+                Use new recording
+              </button>
+              {replacementRecording ? <span className="editor-ready-note">New recording ready.</span> : null}
+            </div>
+          </section>
+
+          <section className="editor-step">
+            <div className="editor-step-head">
+              <span>4</span>
+              <div>
+                <h3>Compare and apply</h3>
+                <p>Use one player to hear the full take, the selected part, or the edited result.</p>
+              </div>
+            </div>
+            <div className="audio-preview-grid compare-panel">
+              <div className="compare-toggle" role="group" aria-label="Audio preview">
+                <button className={previewMode === "full" ? "active" : ""} type="button" onClick={() => playPreview("full")}>
+                  Full recording
+                  <span>Full take</span>
+                </button>
+                <button className={previewMode === "before" ? "active" : ""} type="button" onClick={() => playPreview("before")} disabled={!selectedPreviewUrl}>
+                  Before
+                  <span>Play selected</span>
+                </button>
+                <button className={previewMode === "after" ? "active" : ""} type="button" onClick={() => playPreview("after")} disabled={!hasAfterPreview}>
+                  After
+                  <span>{hasAfterPreview ? "Edited take" : "Needs new recording"}</span>
+                </button>
+              </div>
+              <div className="audio-preview-card full-audio-card">
+                <div>
+                  <strong>{activePreviewLabel}</strong>
+                  <span>{previewMode === "after" ? "Full take with replacement applied" : previewMode === "before" ? "Selected portion" : "Full take"}</span>
+                </div>
+                <audio key={activePreviewUrl} ref={compareAudioRef} controls preload="auto" src={activePreviewUrl} />
+              </div>
+            </div>
+            <div className="guided-action-row danger-zone">
+              <button className="secondary-button" type="button" onClick={onApplyCrop} disabled={!selectedRange}>
+                Keep only selected part
+              </button>
+              <button className="secondary-button danger" type="button" onClick={onRemoveSelection} disabled={!selectedRange}>
+                <Trash2 size={15} /> Delete selected part
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <p className="audio-editor-note">Edits only change this take after you apply them. Save will upload the corrected high-quality WAV.</p>
+      </section>
+    </div>
+  );
+}
+
+function WaveformSelector({
+  recording,
+  startSeconds,
+  endSeconds,
+  onChange,
+}: {
+  recording: TrainingRecording;
+  startSeconds: number;
+  endSeconds: number;
+  onChange: (startSeconds: number, endSeconds: number) => void;
+}) {
+  const dragRef = useRef<{ mode: "start" | "end" | "selection" | "new"; anchorSeconds: number; offsetSeconds: number } | null>(null);
+  const peaks = useMemo<WaveformPeak[]>(() => buildWaveformPeaks(recording.samples, 112), [recording.samples]);
+  const durationSeconds = Math.max(recording.durationSeconds, 0.1);
+  const safeStart = Math.max(0, Math.min(startSeconds, durationSeconds));
+  const safeEnd = Math.max(safeStart + 0.05, Math.min(endSeconds, durationSeconds));
+  const startPercent = (safeStart / durationSeconds) * 100;
+  const endPercent = (safeEnd / durationSeconds) * 100;
+
+  function secondsFromPointer(event: ReactPointerEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(rect.width, 1)));
+    return ratio * durationSeconds;
+  }
+
+  function commitRange(start: number, end: number) {
+    const nextStart = Math.max(0, Math.min(start, durationSeconds));
+    const nextEnd = Math.max(0, Math.min(end, durationSeconds));
+    if (Math.abs(nextStart - nextEnd) < 0.05) {
+      const expandedEnd = Math.min(durationSeconds, nextStart + 0.5);
+      onChange(Math.max(0, Math.min(nextStart, expandedEnd - 0.05)), expandedEnd);
+      return;
+    }
+    onChange(Math.min(nextStart, nextEnd), Math.max(nextStart, nextEnd));
+  }
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    const pointerSeconds = secondsFromPointer(event);
+    const target = event.target as HTMLElement;
+    const handle = target.dataset.handle;
+    const insideSelection = Boolean(target.closest(".waveform-selection"));
+
+    if (handle === "start" || handle === "end") {
+      dragRef.current = { mode: handle, anchorSeconds: pointerSeconds, offsetSeconds: 0 };
+    } else if (insideSelection) {
+      dragRef.current = { mode: "selection", anchorSeconds: pointerSeconds, offsetSeconds: pointerSeconds - safeStart };
+    } else {
+      dragRef.current = { mode: "new", anchorSeconds: pointerSeconds, offsetSeconds: 0 };
+      commitRange(pointerSeconds, Math.min(durationSeconds, pointerSeconds + 0.5));
+    }
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag) return;
+
+    const pointerSeconds = secondsFromPointer(event);
+    if (drag.mode === "start") {
+      commitRange(Math.min(pointerSeconds, safeEnd - 0.05), safeEnd);
+      return;
+    }
+    if (drag.mode === "end") {
+      commitRange(safeStart, Math.max(pointerSeconds, safeStart + 0.05));
+      return;
+    }
+    if (drag.mode === "selection") {
+      const selectionLength = safeEnd - safeStart;
+      const nextStart = Math.max(0, Math.min(durationSeconds - selectionLength, pointerSeconds - drag.offsetSeconds));
+      commitRange(nextStart, nextStart + selectionLength);
+      return;
+    }
+    commitRange(drag.anchorSeconds, pointerSeconds);
+  }
+
+  function handlePointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+
+  return (
+    <div className="audio-editor-waveform">
+      <div className="waveform-time-row">
+        <span>0:00</span>
+        <strong>
+          {safeStart.toFixed(1)}s - {safeEnd.toFixed(1)}s
+        </strong>
+        <span>{formatDuration(Math.round(durationSeconds))}</span>
+      </div>
+      <div
+        className="waveform-timeline"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        role="slider"
+        aria-label="Waveform selection"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(durationSeconds * 10) / 10}
+        aria-valuenow={Math.round(safeStart * 10) / 10}
+      >
+        <div className="waveform-bars" aria-hidden="true">
+          {peaks.map((peak, index) => {
+            const height = Math.max(8, Math.min(100, Math.max(Math.abs(peak.min), Math.abs(peak.max)) * 100));
+            return <span key={`${index}-${peak.min}-${peak.max}`} style={{ height: `${height}%` }} />;
+          })}
+        </div>
+        <div
+          className="waveform-selection"
+          style={{
+            left: `${startPercent}%`,
+            width: `${Math.max(1, endPercent - startPercent)}%`,
+          }}
+        >
+          <span className="waveform-handle" data-handle="start" aria-hidden="true" />
+          <span className="waveform-selection-label">Selected</span>
+          <span className="waveform-handle" data-handle="end" aria-hidden="true" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function useAudioPreviewUrl(samples: Float32Array | null, sampleRate: number) {
+  const [previewUrl, setPreviewUrl] = useState("");
+  const previewUrlRef = useRef("");
+
+  useEffect(() => {
+    let active = true;
+    const frame = window.requestAnimationFrame(() => {
+      if (!active) return;
+      const nextUrl =
+        samples?.length && Number.isFinite(sampleRate) && sampleRate > 0
+          ? createTrainingRecordingFromSamples({ samples, sampleRate }).url
+          : "";
+      const previousUrl = previewUrlRef.current;
+      previewUrlRef.current = nextUrl;
+      setPreviewUrl(nextUrl);
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+    });
+
+    return () => {
+      active = false;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [sampleRate, samples]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+      }
+    };
+  }, []);
+
+  return previewUrl;
+}
+
+function resolveEditorSelection(recording: TrainingRecording, startSeconds: string, endSeconds: string) {
+  const start = Number(startSeconds);
+  const end = Number(endSeconds);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  const safeStart = Math.max(0, Math.min(start, recording.durationSeconds));
+  const safeEnd = Math.max(safeStart, Math.min(end, recording.durationSeconds));
+  if (safeEnd <= safeStart) return null;
+  return {
+    startSeconds: safeStart,
+    endSeconds: safeEnd,
+    durationSeconds: safeEnd - safeStart,
+  };
 }
 
 function ReaderTaskStatusPill({ status }: { status?: ReaderTaskStatus }) {
@@ -2392,6 +3180,24 @@ function recordingActivityStatusLabel(recording: AdminRecording) {
   if (recording.quality_status === "pending") return "Saved successfully - quality analyzing";
   if (recording.quality_status === "failed") return "Saved successfully - quality check failed";
   return "Saved successfully";
+}
+
+function repairMistakeMarkers(
+  markers: MistakeMarker[],
+  startSeconds: number,
+  endSeconds: number,
+  replacementDurationSeconds: number,
+) {
+  const deltaSeconds = replacementDurationSeconds - (endSeconds - startSeconds);
+  return markers
+    .filter((marker) => marker.seconds < startSeconds || marker.seconds > endSeconds)
+    .map((marker) => (marker.seconds > endSeconds ? { ...marker, seconds: Math.max(0, marker.seconds + deltaSeconds) } : marker));
+}
+
+function cropMistakeMarkers(markers: MistakeMarker[], startSeconds: number, endSeconds: number) {
+  return markers
+    .filter((marker) => marker.seconds >= startSeconds && marker.seconds <= endSeconds)
+    .map((marker) => ({ ...marker, seconds: Math.max(0, marker.seconds - startSeconds) }));
 }
 
 function NotificationBell({ count, tasks }: { count: number; tasks: ReaderTaskProgressItem[] }) {

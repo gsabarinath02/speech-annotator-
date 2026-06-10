@@ -231,6 +231,53 @@ describe("reader presentation styles", () => {
     expect(css).toContain(".activity-timeline");
   });
 
+  it("gives readers a waveform speech editor for correcting long recordings", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("markMistake");
+    expect(component).toContain("Beep");
+    expect(component).toContain("Beep added");
+    expect(component).toContain("beep-toast");
+    expect(component).not.toContain("beep-feedback");
+    expect(component).toContain("Speech editor");
+    expect(component).toContain("Open editor");
+    expect(component).toContain("AudioEditorModal");
+    expect(component).toContain("WaveformSelector");
+    expect(component).toContain("waveform-selection");
+    expect(component).toContain("Fix a mistake");
+    expect(component).toContain("Choose mistake");
+    expect(component).toContain("Fix this part");
+    expect(component).toContain("Listen to the selected part");
+    expect(component).toContain("Play selected");
+    expect(component).toContain("Move start earlier");
+    expect(component).toContain("Move end later");
+    expect(component).toContain("Advanced timing");
+    expect(component).toContain("Full recording");
+    expect(component).toContain("Full take");
+    expect(component).toContain("recording.url");
+    expect(component).toContain("selectedRangeKey");
+    expect(component).toContain("Before");
+    expect(component).toContain("After");
+    expect(component).toContain("Re-record this part");
+    expect(component).toContain("Use new recording");
+    expect(component).toContain("Keep only selected part");
+    expect(component).toContain("Delete selected part");
+    expect(component).toContain("mistakeMarkers");
+    expect(css).toContain(".mistake-tools");
+    expect(css).toContain(".beep-toast");
+    expect(css).not.toContain(".beep-feedback");
+    expect(css).toContain(".audio-editor-modal");
+    expect(css).toContain(".guided-editor-steps");
+    expect(css).toContain(".editor-step");
+    expect(css).toContain(".compare-toggle");
+    expect(css).toContain(".advanced-timing-panel");
+    expect(css).toContain(".audio-editor-waveform");
+    expect(css).toContain(".waveform-selection");
+    expect(css).toContain(".audio-preview-grid");
+    expect(css).toContain(".mistake-marker-list");
+  });
+
   it("lets readers report script issues and gives admins a tickets view", () => {
     const component = readComponent();
     const css = readFileSync(cssPath, "utf8");
