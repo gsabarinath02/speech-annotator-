@@ -166,3 +166,35 @@ export function createTrainingRecordingFromSamples({
     ...qualityStats,
   };
 }
+
+export async function createTrainingRecordingFromBlob(blob: Blob): Promise<TrainingRecording> {
+  type BrowserAudioContextConstructor = typeof AudioContext;
+  const AudioContextClass =
+    window.AudioContext ||
+    (window as Window & { webkitAudioContext?: BrowserAudioContextConstructor }).webkitAudioContext;
+
+  if (!AudioContextClass) {
+    throw new Error("Audio editing is not supported in this browser.");
+  }
+
+  const audioContext = new AudioContextClass();
+  try {
+    const audioBuffer = await audioContext.decodeAudioData(await blob.arrayBuffer());
+    const samples = new Float32Array(audioBuffer.length);
+
+    for (let channelIndex = 0; channelIndex < audioBuffer.numberOfChannels; channelIndex += 1) {
+      const channelSamples = audioBuffer.getChannelData(channelIndex);
+      for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex += 1) {
+        samples[sampleIndex] += channelSamples[sampleIndex] / audioBuffer.numberOfChannels;
+      }
+    }
+
+    return createTrainingRecordingFromSamples({
+      samples,
+      sampleRate: audioBuffer.sampleRate,
+      durationSeconds: audioBuffer.duration,
+    });
+  } finally {
+    await audioContext.close().catch(() => undefined);
+  }
+}

@@ -12,6 +12,7 @@ import {
   ChevronRight,
   ClipboardCheck,
   Download,
+  FileClock,
   FileText,
   Headset,
   KeyRound,
@@ -26,6 +27,7 @@ import {
   Search,
   SlidersHorizontal,
   Square,
+  TriangleAlert,
   Trash2,
   UserPlus,
   UserRound,
@@ -73,6 +75,7 @@ import {
   fetchDatasetSnapshots,
   fetchMe,
   fetchMyRecordings,
+  fetchMyRecordingAudio,
   fetchRecordingAudio,
   fetchScripts,
   login,
@@ -92,7 +95,12 @@ import {
   WaveformPeak,
 } from "../lib/audio/editing";
 import { analyzeRecordingQuality, classifyLiveInputLevel, LiveInputLevel } from "../lib/audio/quality";
-import { createTrainingRecordingFromSamples, TrainingAudioRecorder, TrainingRecording } from "../lib/audio/recorder";
+import {
+  createTrainingRecordingFromBlob,
+  createTrainingRecordingFromSamples,
+  TrainingAudioRecorder,
+  TrainingRecording,
+} from "../lib/audio/recorder";
 import {
   buildReaderTaskProgress,
   firstActionableScriptIndex,
@@ -129,6 +137,7 @@ type BackgroundSave = {
   response?: RecordingResponse;
   error?: string;
 };
+type ActivityHistoryFilter = "all" | "completed" | "pending" | "redo";
 
 const TONE_PATTERN = /^\s*(?:\*\*)?\[([A-Za-z][A-Za-z\s-]*)\](?:\*\*)?\s*/;
 const SESSION_STORAGE_KEY = "outcomes-speech-studio-session";
@@ -1419,6 +1428,7 @@ function ScriptRecorder({
   const [contextPanelOpen, setContextPanelOpen] = useState(true);
   const [contextAutoClosed, setContextAutoClosed] = useState(false);
   const [activityPanelOpen, setActivityPanelOpen] = useState(false);
+  const [editingSavedRecordingId, setEditingSavedRecordingId] = useState("");
   const [ticketPanelOpen, setTicketPanelOpen] = useState(false);
   const [ticketMessage, setTicketMessage] = useState("");
   const [ticketSubmitting, setTicketSubmitting] = useState(false);
@@ -1496,7 +1506,7 @@ function ScriptRecorder({
               : "Ready";
   const contextToggleLabel = contextPanelOpen ? "Hide context" : "Show context";
   const contextToggleTitle = recordingContextComplete ? contextToggleLabel : `${contextToggleLabel} before recording`;
-  const activityToggleLabel = activityPanelOpen ? "Hide activity" : "Show activity";
+  const activityToggleLabel = activityPanelOpen ? "Hide recording history" : "Show recording history";
   const ticketToggleLabel = ticketPanelOpen ? "Hide script issue form" : "Report script issue";
 
   useEffect(() => {
@@ -2007,6 +2017,48 @@ function ScriptRecorder({
     setRepairPanelOpen(true);
   }
 
+  async function editSavedRecording(historyRecording: AdminRecording) {
+    if (!canLeaveUnsavedRecording()) return;
+
+    setEditingSavedRecordingId(historyRecording.id);
+    setError("");
+    setNotice("");
+    try {
+      const savedAudio = await fetchMyRecordingAudio(session.token, historyRecording.id);
+      const editableRecording = await createTrainingRecordingFromBlob(savedAudio);
+      const savedScriptId = historyRecording.script?.id || historyRecording.prompt?.id || "";
+      const matchingScriptIndex = scripts.findIndex((item) => item.id === savedScriptId);
+
+      repairRecorderRef.current?.cancel().catch(() => undefined);
+      repairRecorderRef.current = null;
+      if (recording?.url) URL.revokeObjectURL(recording.url);
+      clearReplacementRecording();
+      resetScriptTicketPanel();
+      updateBackgroundSave(null);
+      setRecording(editableRecording);
+      setMistakeMarkers([]);
+      setRecordingState("review");
+      setSaveResult(null);
+      setUploadError("");
+      setUploadProgress(0);
+      setRepairRecordingState("idle");
+      setRepairElapsedSeconds(0);
+      setRepairStartSeconds("0.0");
+      setRepairEndSeconds(Math.min(editableRecording.durationSeconds, 6).toFixed(1));
+      setRepairPanelOpen(true);
+      setActivityPanelOpen(false);
+      if (matchingScriptIndex >= 0) {
+        setScriptIndex(matchingScriptIndex);
+        setActiveLineIndex(0);
+      }
+      setNotice("Editing saved take. Save creates a new corrected take.");
+    } catch (editError) {
+      setError(editError instanceof Error ? editError.message : "Could not load saved recording for editing.");
+    } finally {
+      setEditingSavedRecordingId("");
+    }
+  }
+
   function setRepairPoint(point: "start" | "end") {
     const currentTime = reviewAudioRef.current?.currentTime ?? 0;
     const value = currentTime.toFixed(1);
@@ -2280,7 +2332,7 @@ function ScriptRecorder({
                   aria-expanded={ticketPanelOpen}
                   title="Report script issue"
                 >
-                  <MessageSquareWarning size={16} />
+                  <TriangleAlert size={16} />
                 </button>
                 <button
                   className={autoScroll ? "reader-utility-button auto-scroll-toggle active" : "reader-utility-button auto-scroll-toggle"}
@@ -2299,7 +2351,7 @@ function ScriptRecorder({
                   aria-expanded={activityPanelOpen}
                   title={activityToggleLabel}
                 >
-                  <Bell size={16} />
+                  <FileClock size={16} />
                 </button>
               </div>
               {ticketPanelOpen ? (
@@ -2357,6 +2409,8 @@ function ScriptRecorder({
               taskProgress={taskProgress}
               recordings={myRecordings}
               backgroundSave={backgroundSave}
+              editingRecordingId={editingSavedRecordingId}
+              onEditRecording={(historyRecording) => void editSavedRecording(historyRecording)}
               onClose={() => setActivityPanelOpen(false)}
             />
 
@@ -3074,6 +3128,8 @@ function RecordingActivityPanel({
   taskProgress,
   recordings,
   backgroundSave,
+  editingRecordingId,
+  onEditRecording,
   onClose,
 }: {
   open: boolean;
@@ -3081,6 +3137,8 @@ function RecordingActivityPanel({
   taskProgress: ReturnType<typeof buildReaderTaskProgress>;
   recordings: AdminRecording[];
   backgroundSave: BackgroundSave | null;
+  editingRecordingId: string;
+  onEditRecording: (recording: AdminRecording) => void;
   onClose: () => void;
 }) {
   const sortedRecordings = [...recordings].sort((left, right) => {
@@ -3093,6 +3151,44 @@ function RecordingActivityPanel({
   const completedCount = taskProgress.summary.completed;
   const pendingCount = taskProgress.summary.pending;
   const redoCount = taskProgress.summary.redo;
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historyFilter, setHistoryFilter] = useState<ActivityHistoryFilter>("all");
+  const historyRows = sortedRecordings.map((historyRecording) => {
+    const title = historyRecording.script ? scriptDisplayTitle(historyRecording.script) : historyRecording.prompt?.text || "Task";
+    const statusLabel = recordingActivityStatusLabel(historyRecording);
+    const filterStatus = recordingActivityFilterStatus(historyRecording);
+    const takeLabel = historyRecording.take_number ? `Take ${historyRecording.take_number}` : "Take saved";
+    const dateLabel = historyRecording.timestamp ? formatShortDate(historyRecording.timestamp) : "Unknown date";
+    return {
+      recording: historyRecording,
+      title,
+      statusLabel,
+      filterStatus,
+      takeLabel,
+      dateLabel,
+      searchText: `${title} ${statusLabel} ${takeLabel} ${dateLabel}`.toLowerCase(),
+    };
+  });
+  const normalizedHistoryQuery = historyQuery.trim().toLowerCase();
+  const filteredHistoryRows = historyRows.filter((historyRow) => {
+    const matchesFilter = historyFilter === "all" || historyRow.filterStatus === historyFilter;
+    const matchesQuery = !normalizedHistoryQuery || historyRow.searchText.includes(normalizedHistoryQuery);
+    return matchesFilter && matchesQuery;
+  });
+  const historyCounts = historyRows.reduce(
+    (counts, historyRow) => {
+      counts.all += 1;
+      counts[historyRow.filterStatus] += 1;
+      return counts;
+    },
+    { all: 0, completed: 0, pending: 0, redo: 0 } as Record<ActivityHistoryFilter, number>,
+  );
+  const historyFilterOptions: Array<{ value: ActivityHistoryFilter; label: string; count: number }> = [
+    { value: "all", label: "All recordings", count: historyCounts.all },
+    { value: "completed", label: "Completed", count: historyCounts.completed },
+    { value: "pending", label: "Pending", count: historyCounts.pending },
+    { value: "redo", label: "Redo", count: historyCounts.redo },
+  ];
 
   return (
     <aside
@@ -3109,7 +3205,7 @@ function RecordingActivityPanel({
                 {completedCount}/{taskProgress.summary.total} completed
               </strong>
             </div>
-            <button className="icon-action-button" type="button" onClick={onClose} aria-label="Hide activity">
+            <button className="icon-action-button" type="button" onClick={onClose} aria-label="Hide recording history">
               <X size={15} />
             </button>
           </div>
@@ -3127,6 +3223,50 @@ function RecordingActivityPanel({
               Redo
             </span>
           </div>
+          <div className="activity-controls">
+            <label className="activity-search">
+              <Search size={14} />
+              <input
+                type="search"
+                value={historyQuery}
+                placeholder="Search recordings"
+                aria-label="Search recordings"
+                onChange={(event) => setHistoryQuery(event.target.value)}
+              />
+            </label>
+            <div className="activity-filter-row" role="group" aria-label="Filter recording history">
+              {historyFilterOptions.map((option) => (
+                <button
+                  className={historyFilter === option.value ? "active" : ""}
+                  type="button"
+                  key={option.value}
+                  onClick={() => setHistoryFilter(option.value)}
+                >
+                  <strong>{option.count}</strong>
+                  <span>{option.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="activity-list-count">
+              <span>
+                {historyRows.length
+                  ? `Showing ${filteredHistoryRows.length} of ${historyRows.length} recordings`
+                  : "No recordings yet"}
+              </span>
+              {historyQuery || historyFilter !== "all" ? (
+                <button
+                  className="text-button"
+                  type="button"
+                  onClick={() => {
+                    setHistoryQuery("");
+                    setHistoryFilter("all");
+                  }}
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
+          </div>
           {backgroundSave ? (
             <div className={`activity-current ${backgroundSave.status}`}>
               <span>{backgroundSaveStatusLabel(backgroundSave.status)}</span>
@@ -3141,20 +3281,35 @@ function RecordingActivityPanel({
             </div>
           ) : null}
           <div className="activity-timeline">
-            {sortedRecordings.length ? (
-              sortedRecordings.map((historyRecording) => (
-                <div className="activity-item" key={historyRecording.id || historyRecording.sha256}>
-                  <span className={`activity-dot ${historyRecording.review_status ?? "pending"}`} aria-hidden="true" />
-                  <div>
-                    <strong>{historyRecording.script ? scriptDisplayTitle(historyRecording.script) : historyRecording.prompt?.text || "Task"}</strong>
-                    <span>{recordingActivityStatusLabel(historyRecording)}</span>
-                    <small>
-                      {historyRecording.take_number ? `Take ${historyRecording.take_number}` : "Take saved"}
-                      {historyRecording.timestamp ? ` - ${formatShortDate(historyRecording.timestamp)}` : ""}
-                    </small>
+            {historyRows.length ? (
+              filteredHistoryRows.length ? (
+                filteredHistoryRows.map((historyRow) => (
+                  <div className="activity-item" key={historyRow.recording.id || historyRow.recording.sha256}>
+                    <span className={`activity-dot ${historyRow.recording.review_status ?? "pending"}`} aria-hidden="true" />
+                    <div>
+                      <strong>{historyRow.title}</strong>
+                      <span className={`activity-status-chip ${historyRow.filterStatus}`}>{historyRow.statusLabel}</span>
+                      <small>
+                        {historyRow.takeLabel} - {historyRow.dateLabel}
+                      </small>
+                      <button
+                        className="activity-item-action"
+                        type="button"
+                        onClick={() => onEditRecording(historyRow.recording)}
+                        disabled={editingRecordingId === historyRow.recording.id}
+                      >
+                        <RotateCcw size={13} />
+                        {editingRecordingId === historyRow.recording.id ? "Loading" : "Edit saved take"}
+                      </button>
+                    </div>
                   </div>
+                ))
+              ) : (
+                <div className="activity-empty">
+                  <strong>No matching recordings</strong>
+                  <span>Try a different search or filter.</span>
                 </div>
-              ))
+              )
             ) : (
               <div className="activity-empty">
                 <strong>No recordings yet</strong>
@@ -3180,6 +3335,12 @@ function recordingActivityStatusLabel(recording: AdminRecording) {
   if (recording.quality_status === "pending") return "Saved successfully - quality analyzing";
   if (recording.quality_status === "failed") return "Saved successfully - quality check failed";
   return "Saved successfully";
+}
+
+function recordingActivityFilterStatus(recording: AdminRecording): Exclude<ActivityHistoryFilter, "all"> {
+  if (recording.review_status === "accepted") return "completed";
+  if (recording.review_status === "needs_redo" || recording.review_status === "rejected") return "redo";
+  return "pending";
 }
 
 function repairMistakeMarkers(

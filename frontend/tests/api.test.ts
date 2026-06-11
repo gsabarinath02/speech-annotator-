@@ -15,6 +15,7 @@ import {
   fetchDatasetDashboard,
   fetchMe,
   fetchMyRecordings,
+  fetchMyRecordingAudio,
   fetchRecordingAudio,
   fetchScripts,
   login,
@@ -278,6 +279,22 @@ describe("speech studio API helpers", () => {
     expect(result).toBe(wavBlob);
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/api/admin/recordings/recording-1/audio",
+      { headers: { Authorization: "Bearer session-token" } },
+    );
+  });
+
+  it("fetches the signed-in user's own recording audio as a protected blob", async () => {
+    const wavBlob = new Blob(["wav"], { type: "audio/wav" });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      blob: () => Promise.resolve(wavBlob),
+    } as Response);
+
+    const result = await fetchMyRecordingAudio("session-token", "recording-1");
+
+    expect(result).toBe(wavBlob);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/recordings/my/recording-1/audio",
       { headers: { Authorization: "Bearer session-token" } },
     );
   });

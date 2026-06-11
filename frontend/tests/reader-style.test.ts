@@ -219,15 +219,31 @@ describe("reader presentation styles", () => {
 
     expect(component).toContain("RecordingActivityPanel");
     expect(component).toContain("activityPanelOpen");
-    expect(component).toContain("Hide activity");
-    expect(component).toContain("Show activity");
+    expect(component).toContain("Hide recording history");
+    expect(component).toContain("Show recording history");
     expect(component).toContain("Recording history");
+    expect(component).toContain("Search recordings");
+    expect(component).toContain("historyQuery");
+    expect(component).toContain("historyFilter");
+    expect(component).toContain("onEditRecording");
+    expect(component).toContain("editingSavedRecordingId");
+    expect(component).toContain("Edit saved take");
+    expect(component).toContain("Editing saved take. Save creates a new corrected take.");
+    expect(component).toContain("All recordings");
+    expect(component).toContain("activity-search");
+    expect(component).toContain("activity-filter-row");
     expect(component).toContain("Currently saving");
     expect(component).toContain("Saved successfully");
     expect(component).toContain("Completed");
     expect(component).toContain("activity-panel-toggle");
+    expect(component).toContain("FileClock");
+    expect(component).toContain("TriangleAlert");
     expect(css).toContain(".recording-activity-panel");
     expect(css).toContain(".recording-activity-panel.collapsed");
+    expect(css).toContain(".activity-search");
+    expect(css).toContain(".activity-filter-row");
+    expect(css).toContain(".activity-list-count");
+    expect(css).toContain(".activity-item-action");
     expect(css).toContain(".activity-timeline");
   });
 

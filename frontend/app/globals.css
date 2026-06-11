@@ -1872,21 +1872,23 @@ p {
 }
 
 .script-recorder.activity-open .script-reader {
-  width: min(calc(100% - 21rem), 70rem);
-  margin-right: 20rem;
-  margin-left: max(0.75rem, calc((100% - 70rem - 20rem) / 2));
+  width: min(calc(100% - 26rem), 70rem);
+  margin-right: 25rem;
+  margin-left: max(0.75rem, calc((100% - 70rem - 25rem) / 2));
 }
 
 .recording-activity-panel {
   position: absolute;
-  top: clamp(5.7rem, 11vh, 7.8rem);
+  top: clamp(5rem, 9vh, 6.7rem);
   right: 1rem;
   z-index: 7;
   display: grid;
-  align-content: start;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  align-content: stretch;
   gap: 0.75rem;
-  width: min(18rem, calc(100vw - 2rem));
-  max-height: calc(100% - 15rem);
+  width: min(24rem, calc(100vw - 2rem));
+  height: min(42rem, calc(100% - 10rem));
+  max-height: calc(100% - 10rem);
   padding: 0.85rem;
   overflow: hidden;
   color: var(--ink);
@@ -1960,6 +1962,96 @@ p {
   font-variant-numeric: tabular-nums;
 }
 
+.activity-controls {
+  display: grid;
+  gap: 0.52rem;
+  min-width: 0;
+}
+
+.activity-search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.45rem;
+  align-items: center;
+  min-height: 2.35rem;
+  padding: 0 0.65rem;
+  color: var(--muted);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.activity-search input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2rem;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.activity-search input::placeholder {
+  color: rgba(119, 113, 126, 0.78);
+}
+
+.activity-filter-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.activity-filter-row button {
+  display: grid;
+  gap: 0.04rem;
+  min-height: 2.7rem;
+  padding: 0.4rem 0.45rem;
+  color: var(--muted);
+  text-align: left;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.activity-filter-row button.active {
+  color: var(--read-aloud-ink);
+  background: var(--read-aloud-soft);
+  border-color: var(--read-aloud-border);
+}
+
+.activity-filter-row button strong {
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-filter-row button span {
+  overflow: hidden;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-list-count {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 1.45rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.activity-list-count .text-button {
+  min-height: 0;
+  padding: 0;
+  font-size: 0.74rem;
+}
+
 .activity-current {
   display: grid;
   gap: 0.42rem;
@@ -2003,6 +2095,7 @@ p {
   align-content: start;
   gap: 0.05rem;
   min-height: 0;
+  padding-right: 0.15rem;
   overflow: auto;
   scrollbar-width: thin;
 }
@@ -2031,6 +2124,68 @@ p {
   font-size: 0.82rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.activity-item-action {
+  display: inline-flex;
+  justify-self: start;
+  align-items: center;
+  gap: 0.26rem;
+  min-height: 1.75rem;
+  padding: 0.18rem 0.48rem;
+  color: var(--purple);
+  font-size: 0.68rem;
+  font-weight: 850;
+  background: #fff;
+  border: 1px solid rgba(58, 9, 117, 0.14);
+  border-radius: 999px;
+  box-shadow: 0 6px 16px rgba(19, 16, 45, 0.05);
+}
+
+.activity-item-action:hover:not(:disabled) {
+  border-color: rgba(58, 9, 117, 0.28);
+  box-shadow: 0 10px 24px rgba(19, 16, 45, 0.08);
+  transform: translateY(-1px);
+}
+
+.activity-item-action:disabled {
+  color: var(--muted);
+  cursor: wait;
+  background: var(--canvas);
+}
+
+.activity-status-chip {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.1rem 0.38rem;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.activity-status-chip.completed {
+  color: #16723b;
+  background: #f1fff6;
+  border-color: rgba(49, 165, 95, 0.22);
+}
+
+.activity-status-chip.pending {
+  color: var(--purple);
+  background: var(--purple-soft);
+  border-color: rgba(58, 9, 117, 0.14);
+}
+
+.activity-status-chip.redo {
+  color: #8f153f;
+  background: #fff3f7;
+  border-color: rgba(143, 21, 63, 0.16);
 }
 
 .activity-dot {
@@ -3309,7 +3464,8 @@ progress::-webkit-progress-value {
     bottom: 9.5rem;
     left: 1rem;
     width: auto;
-    max-height: min(18rem, calc(100% - 11rem));
+    height: min(22rem, calc(100% - 11rem));
+    max-height: min(22rem, calc(100% - 11rem));
   }
 
   .recording-activity-panel.collapsed {
@@ -3369,7 +3525,8 @@ progress::-webkit-progress-value {
     right: 0.85rem;
     bottom: 9rem;
     left: 0.85rem;
-    max-height: min(15rem, calc(100% - 10rem));
+    height: min(20rem, calc(100% - 10rem));
+    max-height: min(20rem, calc(100% - 10rem));
   }
 
   .dock-timer {
@@ -3497,8 +3654,13 @@ progress::-webkit-progress-value {
     right: 0.65rem;
     bottom: 11.4rem;
     left: 0.65rem;
-    max-height: min(14rem, calc(100% - 12rem));
+    height: min(17rem, calc(100% - 12rem));
+    max-height: min(17rem, calc(100% - 12rem));
     padding: 0.72rem;
+  }
+
+  .activity-filter-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .recorder-control-bar {

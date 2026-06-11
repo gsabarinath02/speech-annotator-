@@ -372,6 +372,53 @@ def test_script_take_save_keeps_only_the_returned_audio_file(tmp_path, monkeypat
     assert wav_files == [response.json()["filename"]]
 
 
+def test_user_can_download_own_recording_audio_for_resubmission_edits(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("ADMIN_PASSWORD", "AdminPass123!")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    app = create_app(upload_dir=tmp_path)
+    client = TestClient(app)
+
+    admin_token = client.post(
+        "/api/auth/login",
+        json={"email": "admin@example.com", "password": "AdminPass123!"},
+    ).json()["token"]
+    first_user = client.post(
+        "/api/admin/users",
+        headers=auth(admin_token),
+        json={"email": "edit-reader@example.com", "password": "VoicePass123!", "display_name": "Edit Reader"},
+    ).json()
+    second_user = client.post(
+        "/api/admin/users",
+        headers=auth(admin_token),
+        json={"email": "other-reader@example.com", "password": "VoicePass123!", "display_name": "Other Reader"},
+    ).json()
+    first_token = client.post(
+        "/api/auth/login",
+        json={"email": first_user["email"], "password": "VoicePass123!"},
+    ).json()["token"]
+    second_token = client.post(
+        "/api/auth/login",
+        json={"email": second_user["email"], "password": "VoicePass123!"},
+    ).json()["token"]
+    script = client.get("/api/scripts", headers=auth(first_token)).json()["scripts"][0]
+    audio = make_wav()
+    saved = client.post(
+        "/api/recordings",
+        headers=auth(first_token),
+        data={"script_id": script["id"]},
+        files={"audio": ("saved.wav", audio, "audio/wav")},
+    ).json()
+
+    own_audio = client.get(f"/api/recordings/my/{saved['id']}/audio", headers=auth(first_token))
+    other_audio = client.get(f"/api/recordings/my/{saved['id']}/audio", headers=auth(second_token))
+
+    assert own_audio.status_code == 200
+    assert own_audio.content == audio
+    assert own_audio.headers["content-type"].startswith("audio/wav")
+    assert other_audio.status_code == 404
+
+
 def test_admin_can_play_legacy_recording_without_stored_recording_id(tmp_path) -> None:
     app = create_app(upload_dir=tmp_path)
     client = TestClient(app)

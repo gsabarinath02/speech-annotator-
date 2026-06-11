@@ -275,6 +275,22 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
                 return recording
         return None
 
+    def recording_file_response(recording: dict[str, Any]) -> FileResponse:
+        stored_path = Path(str(recording.get("file_path", ""))).resolve()
+        upload_root = settings.upload_dir.resolve()
+        try:
+            stored_path.relative_to(upload_root)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Recording not found") from exc
+        if not stored_path.exists() or not stored_path.is_file():
+            raise HTTPException(status_code=404, detail="Recording file not found")
+
+        return FileResponse(
+            stored_path,
+            media_type="audio/wav",
+            filename=recording.get("filename") or stored_path.name,
+        )
+
     def update_recording_quality(recording_id: str, quality: dict[str, Any], quality_status: str) -> None:
         if hasattr(account_store, "update_recording_quality"):
             account_store.update_recording_quality(recording_id, quality, quality_status)
@@ -608,26 +624,23 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         )
         return {"count": len(recordings), "redo_count": redo_count, "recordings": recordings}
 
+    @app.get("/api/recordings/my/{recording_id}/audio")
+    def my_recording_audio(recording_id: str, current_user: dict[str, Any] = Depends(require_user)) -> FileResponse:
+        recording = find_recording(recording_id)
+        user_id = str(current_user.get("id", ""))
+        owner_id = str(recording.get("user_id") or recording.get("user", {}).get("id", "")) if recording else ""
+        if not recording or owner_id != user_id:
+            raise HTTPException(status_code=404, detail="Recording not found")
+
+        return recording_file_response(recording)
+
     @app.get("/api/admin/recordings/{recording_id}/audio")
     def recording_audio(recording_id: str, _admin: dict[str, Any] = Depends(require_admin)) -> FileResponse:
         recording = find_recording(recording_id)
         if not recording:
             raise HTTPException(status_code=404, detail="Recording not found")
 
-        stored_path = Path(str(recording.get("file_path", ""))).resolve()
-        upload_root = settings.upload_dir.resolve()
-        try:
-            stored_path.relative_to(upload_root)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail="Recording not found") from exc
-        if not stored_path.exists() or not stored_path.is_file():
-            raise HTTPException(status_code=404, detail="Recording file not found")
-
-        return FileResponse(
-            stored_path,
-            media_type="audio/wav",
-            filename=recording.get("filename") or stored_path.name,
-        )
+        return recording_file_response(recording)
 
     @app.post("/api/admin/recordings/{recording_id}/best")
     def choose_best_take(recording_id: str, _admin: dict[str, Any] = Depends(require_admin)) -> dict[str, object]:

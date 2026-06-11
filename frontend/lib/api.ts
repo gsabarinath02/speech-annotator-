@@ -409,6 +409,17 @@ export async function fetchRecordingAudio(token: string, recordingId: string): P
   return response.blob();
 }
 
+export async function fetchMyRecordingAudio(token: string, recordingId: string): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}/api/recordings/my/${encodeURIComponent(recordingId)}/audio`, {
+    headers: authHeaders(token),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail ?? payload.error ?? "Could not load recording audio.");
+  }
+  return response.blob();
+}
+
 export async function selectBestTake(token: string, recordingId: string): Promise<AdminRecording> {
   const response = await fetch(`${API_BASE_URL}/api/admin/recordings/${encodeURIComponent(recordingId)}/best`, {
     method: "POST",
