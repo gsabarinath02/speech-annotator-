@@ -814,10 +814,11 @@ function AdminScripts({
       const createdScript = await createScript(session.token, {
         title: "New script",
         text: "[neutral] Add the first sentence here.",
+        is_published: false,
       });
       setSelectedScriptId(createdScript.id);
       await refresh();
-      setNotice("Script added.");
+      setNotice("Script added. New scripts start hidden until you publish them.");
     } catch (scriptError) {
       setError(scriptError instanceof Error ? scriptError.message : "Could not add script.");
     }
@@ -865,6 +866,9 @@ function AdminScripts({
                   <span>
                     <strong>{scriptDisplayTitle(script)}</strong>
                     <small>{script.updated_at ? `Updated ${formatShortDate(script.updated_at)}` : `${script.line_count} lines`}</small>
+                    <span className={script.is_published === false ? "script-status-chip hidden" : "script-status-chip"}>
+                      {script.is_published === false ? "Hidden from users" : "Visible to users"}
+                    </span>
                   </span>
                   <ChevronRight size={15} />
                 </button>
@@ -916,6 +920,7 @@ function ScriptEditor({
 }) {
   const [draftTitle, setDraftTitle] = useState(script.title);
   const [draftText, setDraftText] = useState(script.text);
+  const [draftPublished, setDraftPublished] = useState(script.is_published !== false);
   const [saving, setSaving] = useState(false);
   const previewSegments = parseToneSegments(draftText);
 
@@ -925,7 +930,11 @@ function ScriptEditor({
     setError("");
     setNotice("");
     try {
-      const updated = await updateScript(session.token, script.id, { title: draftTitle, text: draftText });
+      const updated = await updateScript(session.token, script.id, {
+        title: draftTitle,
+        text: draftText,
+        is_published: draftPublished,
+      });
       onSaved(updated);
       await refresh();
       setNotice("Script saved.");
@@ -942,6 +951,21 @@ function ScriptEditor({
       <label className="field script-content-field">
         <span>Script Content</span>
         <textarea className="script-textarea" value={draftText} onChange={(event) => setDraftText(event.target.value)} />
+      </label>
+      <label className="script-visibility-toggle">
+        <input
+          type="checkbox"
+          checked={draftPublished}
+          onChange={(event) => setDraftPublished(event.target.checked)}
+        />
+        <span>
+          <strong>{draftPublished ? "Visible to users" : "Hidden from users"}</strong>
+          <small>
+            {draftPublished
+              ? "Recorders can see this script in their queue."
+              : "Only admins can see this draft. Publish it when it is ready."}
+          </small>
+        </span>
       </label>
       <TonePreview segments={previewSegments} />
       <ScriptTrainingMetadata script={script} draftText={draftText} />

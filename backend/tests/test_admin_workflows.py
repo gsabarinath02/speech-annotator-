@@ -211,6 +211,72 @@ def test_admin_manages_scripts_and_user_records_full_script(tmp_path, monkeypatc
     assert delete_response.status_code == 204
 
 
+def test_admin_can_hide_and_publish_scripts(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("ADMIN_PASSWORD", "AdminPass123!")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    app = create_app(upload_dir=tmp_path)
+    client = TestClient(app)
+    admin_token = client.post(
+        "/api/auth/login",
+        json={"email": "admin@example.com", "password": "AdminPass123!"},
+    ).json()["token"]
+    created_user = client.post(
+        "/api/admin/users",
+        headers=auth(admin_token),
+        json={"email": "reader@example.com", "password": "VoicePass123!", "display_name": "Reader"},
+    )
+    user_token = client.post(
+        "/api/auth/login",
+        json={"email": created_user.json()["email"], "password": "VoicePass123!"},
+    ).json()["token"]
+
+    visible_script = client.post(
+        "/api/admin/scripts",
+        headers=auth(admin_token),
+        json={"title": "Visible script", "text": "[neutral] This should be recorded.", "is_published": True},
+    ).json()
+    hidden_script = client.post(
+        "/api/admin/scripts",
+        headers=auth(admin_token),
+        json={"title": "Draft script", "text": "[neutral] This is not ready.", "is_published": False},
+    ).json()
+
+    assert visible_script["is_published"] is True
+    assert hidden_script["is_published"] is False
+    admin_scripts = client.get("/api/scripts", headers=auth(admin_token)).json()["scripts"]
+    user_scripts = client.get("/api/scripts", headers=auth(user_token)).json()["scripts"]
+    assert hidden_script["id"] in {script["id"] for script in admin_scripts}
+    assert visible_script["id"] in {script["id"] for script in user_scripts}
+    assert hidden_script["id"] not in {script["id"] for script in user_scripts}
+
+    hidden_recording = client.post(
+        "/api/recordings",
+        headers=auth(user_token),
+        data={"script_id": hidden_script["id"]},
+        files={"audio": ("hidden.wav", make_wav(), "audio/wav")},
+    )
+    assert hidden_recording.status_code == 404
+
+    published_script = client.put(
+        f"/api/admin/scripts/{hidden_script['id']}",
+        headers=auth(admin_token),
+        json={"title": hidden_script["title"], "text": hidden_script["text"], "is_published": True},
+    ).json()
+    assert published_script["is_published"] is True
+    user_scripts_after_publish = client.get("/api/scripts", headers=auth(user_token)).json()["scripts"]
+    assert hidden_script["id"] in {script["id"] for script in user_scripts_after_publish}
+
+    hidden_again = client.put(
+        f"/api/admin/scripts/{visible_script['id']}",
+        headers=auth(admin_token),
+        json={"title": visible_script["title"], "text": visible_script["text"], "is_published": False},
+    ).json()
+    assert hidden_again["is_published"] is False
+    user_scripts_after_hide = client.get("/api/scripts", headers=auth(user_token)).json()["scripts"]
+    assert visible_script["id"] not in {script["id"] for script in user_scripts_after_hide}
+
+
 def test_user_reports_script_issue_and_admin_sees_ticket(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("ADMIN_PASSWORD", "AdminPass123!")

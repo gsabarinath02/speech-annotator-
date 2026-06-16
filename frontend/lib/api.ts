@@ -35,6 +35,7 @@ export type Script = {
   title: string;
   text: string;
   line_count: number;
+  is_published?: boolean;
   tone_segments?: Array<{ tone: string; tone_key: string; speaker?: string; speaker_key?: string; text: string }>;
   tones?: string[];
   balance_tags?: string[];
@@ -42,6 +43,12 @@ export type Script = {
   phoneme_coverage?: string[];
   created_at?: string;
   updated_at?: string;
+};
+
+export type ScriptInput = {
+  title: string;
+  text: string;
+  is_published?: boolean;
 };
 
 export type ScriptTicket = {
@@ -322,7 +329,7 @@ export async function createPrompt(token: string, text: string): Promise<Prompt>
   return readJsonOrThrow<Prompt>(response, "Could not add sentence.");
 }
 
-export async function createScript(token: string, script: { title: string; text: string }): Promise<Script> {
+export async function createScript(token: string, script: ScriptInput): Promise<Script> {
   const response = await fetch(`${API_BASE_URL}/api/admin/scripts`, {
     method: "POST",
     headers: { ...authHeaders(token), "Content-Type": "application/json" },
@@ -331,7 +338,7 @@ export async function createScript(token: string, script: { title: string; text:
   return readJsonOrThrow<Script>(response, "Could not add script.");
 }
 
-export async function updateScript(token: string, scriptId: string, script: { title: string; text: string }): Promise<Script> {
+export async function updateScript(token: string, scriptId: string, script: ScriptInput): Promise<Script> {
   const response = await fetch(`${API_BASE_URL}/api/admin/scripts/${encodeURIComponent(scriptId)}`, {
     method: "PUT",
     headers: { ...authHeaders(token), "Content-Type": "application/json" },

@@ -67,6 +67,7 @@ class PromptCreateRequest(BaseModel):
 class ScriptCreateRequest(BaseModel):
     title: str = ""
     text: str
+    is_published: bool = True
 
 
 class ScriptTicketCreateRequest(BaseModel):
@@ -542,7 +543,7 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         _admin: dict[str, Any] = Depends(require_admin),
     ) -> dict[str, object]:
         try:
-            return account_store.create_script(script_request.title, script_request.text)
+            return account_store.create_script(script_request.title, script_request.text, script_request.is_published)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -553,7 +554,7 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         _admin: dict[str, Any] = Depends(require_admin),
     ) -> dict[str, object]:
         try:
-            return account_store.update_script(script_id, script_request.title, script_request.text)
+            return account_store.update_script(script_id, script_request.title, script_request.text, script_request.is_published)
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail="Script not found") from exc
         except ValueError as exc:
@@ -786,6 +787,8 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         script_lookup_id = script_id or prompt_id
         script = account_store.get_script(script_lookup_id) if script_lookup_id else None
         if script_lookup_id and not script:
+            raise HTTPException(status_code=404, detail="Script not found")
+        if script and current_user.get("role") != "admin" and not script.get("is_published", True):
             raise HTTPException(status_code=404, detail="Script not found")
 
         resolved_sentence_index = int(

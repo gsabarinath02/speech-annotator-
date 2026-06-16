@@ -193,6 +193,55 @@ describe("speech studio API helpers", () => {
     );
   });
 
+  it("sends the script publish state when admins create or update scripts", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        await jsonResponse({
+          id: "script-1",
+          index: 1,
+          title: "Draft",
+          text: "[neutral] Draft line.",
+          line_count: 1,
+          is_published: false,
+        }),
+      )
+      .mockResolvedValueOnce(
+        await jsonResponse({
+          id: "script-1",
+          index: 1,
+          title: "Published",
+          text: "[neutral] Published line.",
+          line_count: 1,
+          is_published: true,
+        }),
+      );
+
+    await createScript("session-token", { title: "Draft", text: "[neutral] Draft line.", is_published: false });
+    await updateScript("session-token", "script-1", {
+      title: "Published",
+      text: "[neutral] Published line.",
+      is_published: true,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:8000/api/admin/scripts",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ title: "Draft", text: "[neutral] Draft line.", is_published: false }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:8000/api/admin/scripts/script-1",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ title: "Published", text: "[neutral] Published line.", is_published: true }),
+      }),
+    );
+  });
+
   it("reports upload progress while saving a recording", async () => {
     const uploadListeners = new Map<string, (event: ProgressEvent) => void>();
 

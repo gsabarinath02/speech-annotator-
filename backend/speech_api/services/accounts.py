@@ -118,6 +118,16 @@ def parse_tone_segments(text: str) -> list[dict[str, str]]:
     return segments
 
 
+def normalize_is_published(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "hidden", "draft", "no"}
+    return bool(value)
+
+
 def validate_password_strength(password: str, label: str = "Password") -> None:
     if len(password) < MIN_PASSWORD_LENGTH:
         raise ValueError(f"{label} must be at least {MIN_PASSWORD_LENGTH} characters")
@@ -239,6 +249,7 @@ class AccountStore:
                 "title": seed_script["title"],
                 "text": seed_script["text"],
                 "line_count": script_line_count(seed_script["text"]),
+                "is_published": True,
                 "created_at": utc_now(),
             }
             for index, seed_script in enumerate(self.seed_scripts)
@@ -371,6 +382,7 @@ class AccountStore:
             "line_count": len(tone_segments) or script_line_count(text),
             "tone_segments": tone_segments,
             "tones": tones,
+            "is_published": normalize_is_published(script.get("is_published", True)),
             "created_at": script.get("created_at") or utc_now(),
             "updated_at": script.get("updated_at") or script.get("created_at") or utc_now(),
         }
@@ -590,7 +602,7 @@ class AccountStore:
         raise AuthError("Reset token is invalid or expired")
 
     def list_prompts(self) -> list[dict[str, Any]]:
-        return self._scripts_as_prompts(self.list_scripts())
+        return self._scripts_as_prompts([script for script in self.list_scripts() if script.get("is_published", True)])
 
     def create_prompt(self, text: str) -> dict[str, Any]:
         script = self.create_script(title_from_text(text), text)
@@ -623,6 +635,7 @@ class AccountStore:
         scripts = self.list_scripts()
         if user.get("role") == "admin":
             return scripts
+        scripts = [script for script in scripts if script.get("is_published", True)]
         assigned = self.assigned_script_ids(str(user["id"]))
         if not assigned:
             return scripts
@@ -652,7 +665,7 @@ class AccountStore:
         self.save(state)
         return self.list_assignments()
 
-    def create_script(self, title: str, text: str) -> dict[str, Any]:
+    def create_script(self, title: str, text: str, is_published: bool = True) -> dict[str, Any]:
         clean_title = title.strip()
         clean_text = text.strip()
         if not clean_text:
@@ -668,6 +681,7 @@ class AccountStore:
             "index": next_index,
             "title": clean_title,
             "text": clean_text,
+            "is_published": is_published,
             "created_at": utc_now(),
         })
         scripts.append(script)
@@ -681,7 +695,7 @@ class AccountStore:
                 return script
         return None
 
-    def update_script(self, script_id: str, title: str, text: str) -> dict[str, Any]:
+    def update_script(self, script_id: str, title: str, text: str, is_published: Optional[bool] = None) -> dict[str, Any]:
         clean_title = title.strip()
         clean_text = text.strip()
         if not clean_text:
@@ -699,6 +713,7 @@ class AccountStore:
                     **script,
                     "title": clean_title,
                     "text": clean_text,
+                    "is_published": script.get("is_published", True) if is_published is None else is_published,
                     "updated_at": utc_now(),
                 }
             )
@@ -862,6 +877,7 @@ class PostgresAccountStore(AccountStore):
             title TEXT NOT NULL,
             text TEXT NOT NULL,
             line_count INTEGER NOT NULL,
+            is_published BOOLEAN NOT NULL DEFAULT TRUE,
             created_at TIMESTAMPTZ NOT NULL,
             updated_at TIMESTAMPTZ NOT NULL
         );
@@ -938,6 +954,7 @@ class PostgresAccountStore(AccountStore):
         ALTER TABLE recordings ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'pending';
         ALTER TABLE recordings ADD COLUMN IF NOT EXISTS review_note TEXT NOT NULL DEFAULT '';
         ALTER TABLE recordings ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+        ALTER TABLE scripts ADD COLUMN IF NOT EXISTS is_published BOOLEAN NOT NULL DEFAULT TRUE;
         """
         with self.pool.connection() as connection:
             connection.execute(schema_sql)
@@ -1006,13 +1023,14 @@ class PostgresAccountStore(AccountStore):
     def _insert_script(self, connection: Any, script: dict[str, Any]) -> None:
         connection.execute(
             """
-            INSERT INTO scripts (id, script_index, title, text, line_count, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO scripts (id, script_index, title, text, line_count, is_published, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
                 script_index = EXCLUDED.script_index,
                 title = EXCLUDED.title,
                 text = EXCLUDED.text,
                 line_count = EXCLUDED.line_count,
+                is_published = EXCLUDED.is_published,
                 updated_at = EXCLUDED.updated_at
             """,
             (
@@ -1021,6 +1039,7 @@ class PostgresAccountStore(AccountStore):
                 script["title"],
                 script["text"],
                 script["line_count"],
+                script.get("is_published", True),
                 script["created_at"],
                 script["updated_at"],
             ),
@@ -1045,6 +1064,7 @@ class PostgresAccountStore(AccountStore):
                 "title": row["title"],
                 "text": row["text"],
                 "line_count": row.get("line_count", 1),
+                "is_published": row.get("is_published", True),
                 "created_at": iso_datetime(row.get("created_at")),
                 "updated_at": iso_datetime(row.get("updated_at")),
             }
@@ -1316,7 +1336,7 @@ class PostgresAccountStore(AccountStore):
         return self.public_user(user)
 
     def list_prompts(self) -> list[dict[str, Any]]:
-        return self._scripts_as_prompts(self.list_scripts())
+        return self._scripts_as_prompts([script for script in self.list_scripts() if script.get("is_published", True)])
 
     def create_prompt(self, text: str) -> dict[str, Any]:
         script = self.create_script(title_from_text(text), text)
@@ -1359,12 +1379,17 @@ class PostgresAccountStore(AccountStore):
             return self.list_scripts()
         assigned = self.assigned_script_ids(str(user["id"]))
         if not assigned:
-            return self.list_scripts()
+            with self.pool.connection() as connection:
+                rows = connection.execute(
+                    "SELECT * FROM scripts WHERE is_published = TRUE ORDER BY script_index, created_at"
+                ).fetchall()
+            return [self._row_to_script(row) for row in rows]
         with self.pool.connection() as connection:
             rows = connection.execute(
                 """
                 SELECT * FROM scripts
                 WHERE id = ANY(%s)
+                  AND is_published = TRUE
                 ORDER BY script_index, created_at
                 """,
                 (list(assigned),),
@@ -1401,7 +1426,7 @@ class PostgresAccountStore(AccountStore):
                     )
         return self.list_assignments()
 
-    def create_script(self, title: str, text: str) -> dict[str, Any]:
+    def create_script(self, title: str, text: str, is_published: bool = True) -> dict[str, Any]:
         clean_title = title.strip()
         clean_text = text.strip()
         if not clean_text:
@@ -1417,6 +1442,7 @@ class PostgresAccountStore(AccountStore):
                     "index": row["next_index"],
                     "title": clean_title,
                     "text": clean_text,
+                    "is_published": is_published,
                     "created_at": utc_now(),
                     "updated_at": utc_now(),
                 }
@@ -1429,7 +1455,7 @@ class PostgresAccountStore(AccountStore):
             row = connection.execute("SELECT * FROM scripts WHERE id = %s", (script_id,)).fetchone()
         return self._row_to_script(row) if row else None
 
-    def update_script(self, script_id: str, title: str, text: str) -> dict[str, Any]:
+    def update_script(self, script_id: str, title: str, text: str, is_published: Optional[bool] = None) -> dict[str, Any]:
         clean_title = title.strip()
         clean_text = text.strip()
         if not clean_text:
@@ -1443,6 +1469,7 @@ class PostgresAccountStore(AccountStore):
                 "index": 0,
                 "title": clean_title,
                 "text": clean_text,
+                "is_published": True if is_published is None else is_published,
                 "updated_at": utc_now(),
             }
         )
@@ -1450,10 +1477,14 @@ class PostgresAccountStore(AccountStore):
             result = connection.execute(
                 """
                 UPDATE scripts
-                SET title = %s, text = %s, line_count = %s, updated_at = %s
+                SET title = %s,
+                    text = %s,
+                    line_count = %s,
+                    is_published = COALESCE(%s, is_published),
+                    updated_at = %s
                 WHERE id = %s
                 """,
-                (script["title"], script["text"], script["line_count"], script["updated_at"], script_id),
+                (script["title"], script["text"], script["line_count"], is_published, script["updated_at"], script_id),
             )
             if result.rowcount == 0:
                 raise NotFoundError("Script not found")

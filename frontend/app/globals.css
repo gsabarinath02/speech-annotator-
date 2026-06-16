@@ -510,6 +510,30 @@ p {
   font-size: 0.78rem;
 }
 
+.script-status-chip {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.12rem 0.45rem;
+  color: #16723b;
+  font-size: 0.68rem;
+  font-weight: 850;
+  line-height: 1.2;
+  background: #f1fff6;
+  border: 1px solid rgba(49, 165, 95, 0.22);
+  border-radius: 999px;
+}
+
+.script-status-chip.hidden {
+  color: #736d7e;
+  background: #f7f5fa;
+  border-color: rgba(19, 16, 45, 0.1);
+}
+
+.script-library-item .script-status-chip {
+  display: inline-flex;
+}
+
 .script-editor {
   display: grid;
   align-content: start;
@@ -523,6 +547,40 @@ p {
 
 .script-textarea {
   min-height: 18rem;
+}
+
+.script-visibility-toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.78rem 0.9rem;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.script-visibility-toggle input {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--purple);
+}
+
+.script-visibility-toggle span {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.script-visibility-toggle strong {
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.script-visibility-toggle small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
 }
 
 .tone-preview {

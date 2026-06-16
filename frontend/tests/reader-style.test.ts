@@ -247,6 +247,21 @@ describe("reader presentation styles", () => {
     expect(css).toContain(".activity-timeline");
   });
 
+  it("lets admins publish or hide scripts without deleting them", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("is_published");
+    expect(component).toContain("Visible to users");
+    expect(component).toContain("Hidden from users");
+    expect(component).toContain("New scripts start hidden");
+    expect(component).toContain("script-visibility-toggle");
+    expect(component).toContain("script-status-chip");
+    expect(css).toContain(".script-visibility-toggle");
+    expect(css).toContain(".script-status-chip");
+    expect(css).toContain(".script-status-chip.hidden");
+  });
+
   it("gives readers a waveform speech editor for correcting long recordings", () => {
     const component = readComponent();
     const css = readFileSync(cssPath, "utf8");
