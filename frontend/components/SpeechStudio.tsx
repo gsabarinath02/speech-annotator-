@@ -9,11 +9,14 @@ import {
   BookOpen,
   Check,
   ChevronLeft,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   ClipboardCheck,
   Download,
   FileClock,
   FileText,
+  GripVertical,
   Headset,
   KeyRound,
   LogOut,
@@ -38,6 +41,7 @@ import {
 import {
   ChangeEvent,
   CSSProperties,
+  DragEvent as ReactDragEvent,
   FormEvent,
   PointerEvent as ReactPointerEvent,
   ReactNode,
@@ -89,7 +93,7 @@ import {
   updateRecordingReview,
   updateScript,
 } from "../lib/api";
-import { scriptInputFromFile } from "../lib/script-import";
+import { moveScriptImportItem, ScriptImportItem, scriptImportItemsFromFiles } from "../lib/script-import";
 import {
   buildWaveformPeaks,
   MistakeMarker,
@@ -806,7 +810,10 @@ function AdminScripts({
   const [search, setSearch] = useState("");
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [uploadingScripts, setUploadingScripts] = useState(false);
+  const [pendingImportItems, setPendingImportItems] = useState<ScriptImportItem[]>([]);
+  const [draggedImportIndex, setDraggedImportIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedScript = scripts.find((script) => script.id === selectedScriptId) ?? scripts[0];
   const filteredScripts = scripts.filter((script) => {
@@ -904,21 +911,45 @@ function AdminScripts({
     setError("");
     setNotice("");
     try {
+      const importItems = await scriptImportItemsFromFiles(files);
+      if (!importItems.length) {
+        setError("Choose one or more TXT or Markdown files.");
+        return;
+      }
+      setPendingImportItems(importItems);
+      setNotice(`${importItems.length} ${importItems.length === 1 ? "script" : "scripts"} ready. Review the order before import.`);
+    } catch (scriptError) {
+      setError(scriptError instanceof Error ? scriptError.message : "Could not read script files.");
+    } finally {
+      setUploadingScripts(false);
+    }
+  }
+
+  async function handleImportReviewedScripts() {
+    if (!pendingImportItems.length) return;
+
+    setUploadingScripts(true);
+    setError("");
+    setNotice("");
+    try {
       let lastCreatedScript: Script | null = null;
-      for (const file of files) {
-        lastCreatedScript = await createScript(session.token, await scriptInputFromFile(file));
+      for (const item of pendingImportItems) {
+        lastCreatedScript = await createScript(session.token, {
+          title: item.title,
+          text: item.text,
+          is_published: item.is_published,
+        });
       }
-      if (lastCreatedScript) {
-        setSelectedScriptId(lastCreatedScript.id);
-      }
+      setPendingImportItems([]);
+      if (lastCreatedScript) setSelectedScriptId(lastCreatedScript.id);
       await refresh();
       setNotice(
-        files.length === 1
+        pendingImportItems.length === 1
           ? "Script uploaded. Uploaded scripts start hidden until you publish them."
-          : `${files.length} scripts uploaded. Uploaded scripts start hidden until you publish them.`,
+          : `${pendingImportItems.length} scripts uploaded in sequence. Uploaded scripts start hidden until you publish them.`,
       );
     } catch (scriptError) {
-      setError(scriptError instanceof Error ? scriptError.message : "Could not upload script file.");
+      setError(scriptError instanceof Error ? scriptError.message : "Could not import scripts.");
     } finally {
       setUploadingScripts(false);
     }
@@ -937,6 +968,15 @@ function AdminScripts({
             multiple
             onChange={(event) => void handleUploadFiles(event)}
           />
+          <input
+            ref={folderInputRef}
+            className="script-upload-input"
+            type="file"
+            accept=".txt,.md,text/plain,text/markdown"
+            multiple
+            onChange={(event) => void handleUploadFiles(event)}
+            {...{ webkitdirectory: "", directory: "" }}
+          />
           <button
             className="secondary-button"
             type="button"
@@ -945,11 +985,41 @@ function AdminScripts({
           >
             <Upload size={16} /> {uploadingScripts ? "Uploading" : "Upload file"}
           </button>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => folderInputRef.current?.click()}
+            disabled={uploadingScripts}
+          >
+            <Upload size={16} /> Upload folder
+          </button>
           <button className="primary-button" type="button" onClick={() => void handleCreate()} disabled={uploadingScripts}>
             <Plus size={16} /> New Script
           </button>
         </div>
       </div>
+
+      {pendingImportItems.length ? (
+        <ScriptImportReviewModal
+          items={pendingImportItems}
+          importing={uploadingScripts}
+          draggedIndex={draggedImportIndex}
+          onCancel={() => {
+            setPendingImportItems([]);
+            setDraggedImportIndex(null);
+          }}
+          onImport={() => void handleImportReviewedScripts()}
+          onMove={(fromIndex, toIndex) => setPendingImportItems((items) => moveScriptImportItem(items, fromIndex, toIndex))}
+          onDragStart={(index) => setDraggedImportIndex(index)}
+          onDragOver={(event, overIndex) => {
+            event.preventDefault();
+            if (draggedImportIndex === null || draggedImportIndex === overIndex) return;
+            setPendingImportItems((items) => moveScriptImportItem(items, draggedImportIndex, overIndex));
+            setDraggedImportIndex(overIndex);
+          }}
+          onDragEnd={() => setDraggedImportIndex(null)}
+        />
+      ) : null}
 
       <div className="script-builder-grid">
         <aside className="script-library" aria-label="Scripts">
@@ -1030,6 +1100,106 @@ function AdminScripts({
           <EmptyState icon={<FileText size={18} />} text="No scripts yet." />
         )}
       </div>
+    </div>
+  );
+}
+
+function ScriptImportReviewModal({
+  items,
+  importing,
+  draggedIndex,
+  onCancel,
+  onImport,
+  onMove,
+  onDragStart,
+  onDragOver,
+  onDragEnd,
+}: {
+  items: ScriptImportItem[];
+  importing: boolean;
+  draggedIndex: number | null;
+  onCancel: () => void;
+  onImport: () => void;
+  onMove: (fromIndex: number, toIndex: number) => void;
+  onDragStart: (index: number) => void;
+  onDragOver: (event: ReactDragEvent<HTMLLIElement>, overIndex: number) => void;
+  onDragEnd: () => void;
+}) {
+  return (
+    <div className="modal-backdrop">
+      <section className="instruction-modal script-import-review" role="dialog" aria-modal="true" aria-labelledby="script-import-title">
+        <button className="instruction-close-button" type="button" onClick={onCancel} aria-label="Close import review" disabled={importing}>
+          <X size={16} />
+        </button>
+        <div className="instruction-modal-head">
+          <span className="instruction-kicker">Bulk script upload</span>
+          <h1 id="script-import-title">Review import order</h1>
+          <p>
+            Files are sorted by script number and topic sequence first. Drag rows, or use the arrows, if you want to change the recorder flow.
+          </p>
+        </div>
+        <div className="script-import-summary">
+          <span>
+            <strong>{items.length}</strong>
+            scripts ready
+          </span>
+          <span>Uploaded scripts start hidden</span>
+        </div>
+        <ol className="script-import-list">
+          {items.map((item, index) => (
+            <li
+              className={draggedIndex === index ? "script-import-row dragging" : "script-import-row"}
+              draggable={!importing}
+              key={item.id}
+              onDragStart={() => onDragStart(index)}
+              onDragOver={(event) => onDragOver(event, index)}
+              onDragEnd={onDragEnd}
+              onDrop={onDragEnd}
+            >
+              <span className="script-import-handle" aria-hidden="true">
+                <GripVertical size={16} />
+              </span>
+              <span className="script-import-position">{index + 1}</span>
+              <span className="script-import-copy">
+                <strong>{item.title}</strong>
+                <small>
+                  {item.lineCount} {item.lineCount === 1 ? "line" : "lines"} - {item.fileName}
+                </small>
+              </span>
+              <span className="script-import-row-actions">
+                <button
+                  className="icon-action-button"
+                  type="button"
+                  onClick={() => onMove(index, index - 1)}
+                  disabled={importing || index === 0}
+                  aria-label={`Move ${item.title} up`}
+                  title="Move up"
+                >
+                  <ChevronUp size={15} />
+                </button>
+                <button
+                  className="icon-action-button"
+                  type="button"
+                  onClick={() => onMove(index, index + 1)}
+                  disabled={importing || index === items.length - 1}
+                  aria-label={`Move ${item.title} down`}
+                  title="Move down"
+                >
+                  <ChevronDown size={15} />
+                </button>
+              </span>
+            </li>
+          ))}
+        </ol>
+        <div className="script-import-footer">
+          <button className="secondary-button" type="button" onClick={onCancel} disabled={importing}>
+            Cancel
+          </button>
+          <button className="primary-button" type="button" onClick={onImport} disabled={importing || !items.length}>
+            <Upload size={16} /> {importing ? "Importing" : "Import scripts"}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

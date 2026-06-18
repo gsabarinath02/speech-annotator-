@@ -282,13 +282,22 @@ describe("reader presentation styles", () => {
     const component = readComponent();
     const css = readFileSync(cssPath, "utf8");
 
-    expect(component).toContain("scriptInputFromFile");
+    expect(component).toContain("scriptImportItemsFromFiles");
+    expect(component).toContain("moveScriptImportItem");
     expect(component).toContain("handleUploadFiles");
     expect(component).toContain("Upload file");
+    expect(component).toContain("Upload folder");
     expect(component).toContain('type="file"');
+    expect(component).toContain("webkitdirectory");
+    expect(component).toContain("ScriptImportReviewModal");
+    expect(component).toContain("Review import order");
+    expect(component).toContain("Import scripts");
+    expect(component).toContain("draggable");
     expect(component).toContain("Uploaded scripts start hidden");
     expect(css).toContain(".script-import-actions");
     expect(css).toContain(".script-upload-input");
+    expect(css).toContain(".script-import-review");
+    expect(css).toContain(".script-import-row");
   });
 
   it("gives readers a waveform speech editor for correcting long recordings", () => {

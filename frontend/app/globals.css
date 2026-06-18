@@ -435,6 +435,121 @@ p {
   display: none;
 }
 
+.script-import-review {
+  width: min(100%, 54rem);
+}
+
+.script-import-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem;
+  color: var(--muted);
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.script-import-summary span {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: baseline;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.script-import-summary strong {
+  color: var(--ink);
+  font-size: 1.05rem;
+}
+
+.script-import-list {
+  display: grid;
+  gap: 0.55rem;
+  max-height: min(22rem, 44vh);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.script-import-row {
+  display: grid;
+  grid-template-columns: auto 2rem minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.72rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.script-import-row.dragging {
+  border-color: rgba(110, 69, 255, 0.45);
+  box-shadow: 0 14px 30px rgba(19, 16, 45, 0.12);
+}
+
+.script-import-handle,
+.script-import-position {
+  display: inline-grid;
+  place-items: center;
+}
+
+.script-import-handle {
+  color: var(--muted);
+  cursor: grab;
+}
+
+.script-import-position {
+  width: 1.8rem;
+  height: 1.8rem;
+  color: var(--purple);
+  font-size: 0.78rem;
+  font-weight: 800;
+  background: var(--purple-soft);
+  border: 1px solid rgba(110, 69, 255, 0.14);
+  border-radius: 999px;
+}
+
+.script-import-copy {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.script-import-copy strong,
+.script-import-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.script-import-copy small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.script-import-row-actions {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.script-import-row-actions .icon-action-button {
+  width: 2.15rem;
+  height: 2.15rem;
+}
+
+.script-import-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  justify-content: flex-end;
+  padding-top: 0.25rem;
+}
+
 .script-builder-grid {
   display: grid;
   grid-template-columns: minmax(15rem, 19rem) minmax(0, 1fr);
