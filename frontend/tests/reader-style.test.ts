@@ -48,6 +48,11 @@ describe("reader presentation styles", () => {
     expect(component).toContain("Save moves you to the next task automatically.");
     expect(component).toContain("Pause keeps the same take; Resume continues from where you paused.");
     expect(component).toContain(
+      'Speak naturally, as a human would when talking with a patient. If it helps the flow, add filler words (for example: "uh," "um," "yeah," "hmm," "okay," or any other words), even if those fillers do not appear in the original recording script.',
+    );
+    expect(component).toContain("Follow the script content closely unless a clear typo is present.");
+    expect(component).not.toContain("Read exactly as written unless a clear typo is present.");
+    expect(component).toContain(
       "I have carefully read these instructions and will make every effort to deliver accurate, high-quality recordings.",
     );
     expect(component).toContain("Continue to recording");

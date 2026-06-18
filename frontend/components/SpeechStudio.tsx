@@ -157,12 +157,13 @@ const UNSAVED_RECORDING_MESSAGE = "You have an unsaved recording.";
 const USER_SPEAKER_TOOLTIP = "Don't need to read this.";
 const READING_INSTRUCTIONS = [
   "Maintain a natural, conversational tone.",
+  'Speak naturally, as a human would when talking with a patient. If it helps the flow, add filler words (for example: "uh," "um," "yeah," "hmm," "okay," or any other words), even if those fillers do not appear in the original recording script.',
   "Keep a healthcare professional baseline: calm, clear, supportive, and confident.",
   "Avoid exaggerated acting, dramatic delivery, or overly emotional performance.",
   "Allow natural pauses at commas, sentence breaks, and transitions.",
   "Ignore any labels shown inside square brackets, such as [warm] or [instruction]. These are performance notes only and should not be read aloud.",
   "Do not rush through numbers, dates, addresses, medication names, or dosages.",
-  "Read exactly as written unless a clear typo is present.",
+  "Follow the script content closely unless a clear typo is present.",
   "Pronounce all words fully; do not casually drop endings or syllables.",
   "Keep pacing steady and controlled across the full script.",
   "For urgent lines, sound calm and focused, not alarming or panicked.",
