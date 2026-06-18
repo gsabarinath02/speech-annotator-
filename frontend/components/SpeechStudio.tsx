@@ -29,12 +29,14 @@ import {
   Square,
   TriangleAlert,
   Trash2,
+  Upload,
   UserPlus,
   UserRound,
   Users,
   X,
 } from "lucide-react";
 import {
+  ChangeEvent,
   CSSProperties,
   FormEvent,
   PointerEvent as ReactPointerEvent,
@@ -87,6 +89,7 @@ import {
   updateRecordingReview,
   updateScript,
 } from "../lib/api";
+import { scriptInputFromFile } from "../lib/script-import";
 import {
   buildWaveformPeaks,
   MistakeMarker,
@@ -802,6 +805,8 @@ function AdminScripts({
   const [selectedScriptIds, setSelectedScriptIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [uploadingScripts, setUploadingScripts] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedScript = scripts.find((script) => script.id === selectedScriptId) ?? scripts[0];
   const filteredScripts = scripts.filter((script) => {
@@ -890,13 +895,60 @@ function AdminScripts({
     }
   }
 
+  async function handleUploadFiles(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+    if (!files.length) return;
+
+    setUploadingScripts(true);
+    setError("");
+    setNotice("");
+    try {
+      let lastCreatedScript: Script | null = null;
+      for (const file of files) {
+        lastCreatedScript = await createScript(session.token, await scriptInputFromFile(file));
+      }
+      if (lastCreatedScript) {
+        setSelectedScriptId(lastCreatedScript.id);
+      }
+      await refresh();
+      setNotice(
+        files.length === 1
+          ? "Script uploaded. Uploaded scripts start hidden until you publish them."
+          : `${files.length} scripts uploaded. Uploaded scripts start hidden until you publish them.`,
+      );
+    } catch (scriptError) {
+      setError(scriptError instanceof Error ? scriptError.message : "Could not upload script file.");
+    } finally {
+      setUploadingScripts(false);
+    }
+  }
+
   return (
     <div className="workspace-section scripts-workspace">
       <div className="section-head">
         <h1>Scripts</h1>
-        <button className="primary-button" type="button" onClick={() => void handleCreate()}>
-          <Plus size={16} /> New Script
-        </button>
+        <div className="script-import-actions">
+          <input
+            ref={fileInputRef}
+            className="script-upload-input"
+            type="file"
+            accept=".txt,.md,text/plain,text/markdown"
+            multiple
+            onChange={(event) => void handleUploadFiles(event)}
+          />
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingScripts}
+          >
+            <Upload size={16} /> {uploadingScripts ? "Uploading" : "Upload file"}
+          </button>
+          <button className="primary-button" type="button" onClick={() => void handleCreate()} disabled={uploadingScripts}>
+            <Plus size={16} /> New Script
+          </button>
+        </div>
       </div>
 
       <div className="script-builder-grid">

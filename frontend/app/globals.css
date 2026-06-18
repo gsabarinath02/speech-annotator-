@@ -424,6 +424,17 @@ p {
   padding: 1.5rem 1.5rem 1.1rem;
 }
 
+.script-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.65rem;
+}
+
+.script-upload-input {
+  display: none;
+}
+
 .script-builder-grid {
   display: grid;
   grid-template-columns: minmax(15rem, 19rem) minmax(0, 1fr);

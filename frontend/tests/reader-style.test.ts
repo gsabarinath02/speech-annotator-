@@ -278,6 +278,19 @@ describe("reader presentation styles", () => {
     expect(css).toContain(".script-library-item.selected");
   });
 
+  it("lets admins upload a file as a hidden draft script", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("scriptInputFromFile");
+    expect(component).toContain("handleUploadFiles");
+    expect(component).toContain("Upload file");
+    expect(component).toContain('type="file"');
+    expect(component).toContain("Uploaded scripts start hidden");
+    expect(css).toContain(".script-import-actions");
+    expect(css).toContain(".script-upload-input");
+  });
+
   it("gives readers a waveform speech editor for correcting long recordings", () => {
     const component = readComponent();
     const css = readFileSync(cssPath, "utf8");
