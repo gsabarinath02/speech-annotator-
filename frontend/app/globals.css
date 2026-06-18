@@ -615,6 +615,31 @@ p {
   padding: 0 0.75rem;
 }
 
+.script-visibility-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0.55rem;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.script-visibility-bulk-actions > span {
+  width: 100%;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.script-visibility-bulk-actions .secondary-button {
+  flex: 1 1 7rem;
+  min-height: 2.1rem;
+  padding: 0 0.65rem;
+}
+
 .script-selection-count {
   color: var(--muted);
   font-size: 0.74rem;

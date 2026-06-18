@@ -262,6 +262,21 @@ describe("reader presentation styles", () => {
     expect(css).toContain(".script-status-chip.hidden");
   });
 
+  it("lets admins bulk show or hide selected scripts and all scripts", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("handleBulkVisibility");
+    expect(component).toContain("bulkUpdatingVisibility");
+    expect(component).toContain("Show selected");
+    expect(component).toContain("Hide selected");
+    expect(component).toContain("Show all");
+    expect(component).toContain("Hide all");
+    expect(component).toContain("Selected scripts are now visible to users.");
+    expect(component).toContain("All scripts are now hidden from users.");
+    expect(css).toContain(".script-visibility-bulk-actions");
+  });
+
   it("lets admins select and bulk delete scripts", () => {
     const component = readComponent();
     const css = readFileSync(cssPath, "utf8");

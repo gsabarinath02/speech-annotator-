@@ -14,6 +14,8 @@ import {
   ChevronUp,
   ClipboardCheck,
   Download,
+  Eye,
+  EyeOff,
   FileClock,
   FileText,
   GripVertical,
@@ -809,6 +811,7 @@ function AdminScripts({
   const [selectedScriptIds, setSelectedScriptIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkUpdatingVisibility, setBulkUpdatingVisibility] = useState(false);
   const [uploadingScripts, setUploadingScripts] = useState(false);
   const [pendingImportItems, setPendingImportItems] = useState<ScriptImportItem[]>([]);
   const [draggedImportIndex, setDraggedImportIndex] = useState<number | null>(null);
@@ -826,6 +829,8 @@ function AdminScripts({
   const validSelectedScriptIds = selectedScriptIds.filter((scriptId) => existingScriptIdSet.has(scriptId));
   const selectedScriptIdSet = new Set(validSelectedScriptIds);
   const allShownSelected = filteredScripts.length > 0 && filteredScripts.every((script) => selectedScriptIdSet.has(script.id));
+  const selectedScriptsForVisibility = scripts.filter((script) => selectedScriptIdSet.has(script.id));
+  const scriptActionBusy = bulkDeleting || bulkUpdatingVisibility || uploadingScripts;
 
   async function handleCreate() {
     setError("");
@@ -899,6 +904,39 @@ function AdminScripts({
       setError(scriptError instanceof Error ? scriptError.message : "Could not delete scripts.");
     } finally {
       setBulkDeleting(false);
+    }
+  }
+
+  async function handleBulkVisibility(targetScripts: Script[], isPublished: boolean, scope: "Selected" | "All") {
+    if (!targetScripts.length) return;
+
+    setBulkUpdatingVisibility(true);
+    setError("");
+    setNotice("");
+    try {
+      await Promise.all(
+        targetScripts.map((script) =>
+          updateScript(session.token, script.id, {
+            title: script.title,
+            text: script.text,
+            is_published: isPublished,
+          }),
+        ),
+      );
+      await refresh();
+      setNotice(
+        scope === "Selected"
+          ? isPublished
+            ? "Selected scripts are now visible to users."
+            : "Selected scripts are now hidden from users."
+          : isPublished
+            ? "All scripts are now visible to users."
+            : "All scripts are now hidden from users.",
+      );
+    } catch (scriptError) {
+      setError(scriptError instanceof Error ? scriptError.message : "Could not update script visibility.");
+    } finally {
+      setBulkUpdatingVisibility(false);
     }
   }
 
@@ -981,7 +1019,7 @@ function AdminScripts({
             className="secondary-button"
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploadingScripts}
+            disabled={scriptActionBusy}
           >
             <Upload size={16} /> {uploadingScripts ? "Uploading" : "Upload file"}
           </button>
@@ -989,11 +1027,11 @@ function AdminScripts({
             className="secondary-button"
             type="button"
             onClick={() => folderInputRef.current?.click()}
-            disabled={uploadingScripts}
+            disabled={scriptActionBusy}
           >
             <Upload size={16} /> Upload folder
           </button>
-          <button className="primary-button" type="button" onClick={() => void handleCreate()} disabled={uploadingScripts}>
+          <button className="primary-button" type="button" onClick={() => void handleCreate()} disabled={scriptActionBusy}>
             <Plus size={16} /> New Script
           </button>
         </div>
@@ -1029,16 +1067,51 @@ function AdminScripts({
           </label>
           <div className="script-library-toolbar">
             <div className="script-library-toolbar-actions">
-              <button className="text-button" type="button" onClick={toggleShownSelection} disabled={!filteredScripts.length || bulkDeleting}>
+              <button className="text-button" type="button" onClick={toggleShownSelection} disabled={!filteredScripts.length || scriptActionBusy}>
                 {allShownSelected ? "Clear shown" : "Select all shown"}
               </button>
               <button
                 className="secondary-button danger"
                 type="button"
                 onClick={() => void handleBulkDelete()}
-                disabled={!validSelectedScriptIds.length || bulkDeleting}
+                disabled={!validSelectedScriptIds.length || scriptActionBusy}
               >
                 <Trash2 size={15} /> {bulkDeleting ? "Deleting" : "Bulk delete"}
+              </button>
+            </div>
+            <div className="script-visibility-bulk-actions" aria-label="Bulk script visibility">
+              <span>Visibility</span>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => void handleBulkVisibility(selectedScriptsForVisibility, true, "Selected")}
+                disabled={!selectedScriptsForVisibility.length || scriptActionBusy}
+              >
+                <Eye size={15} /> Show selected
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => void handleBulkVisibility(selectedScriptsForVisibility, false, "Selected")}
+                disabled={!selectedScriptsForVisibility.length || scriptActionBusy}
+              >
+                <EyeOff size={15} /> Hide selected
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => void handleBulkVisibility(scripts, true, "All")}
+                disabled={!scripts.length || scriptActionBusy}
+              >
+                <Eye size={15} /> Show all
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => void handleBulkVisibility(scripts, false, "All")}
+                disabled={!scripts.length || scriptActionBusy}
+              >
+                <EyeOff size={15} /> Hide all
               </button>
             </div>
             {validSelectedScriptIds.length ? (
