@@ -277,6 +277,65 @@ def test_admin_can_hide_and_publish_scripts(tmp_path, monkeypatch) -> None:
     assert visible_script["id"] not in {script["id"] for script in user_scripts_after_hide}
 
 
+def test_admin_can_bulk_delete_scripts(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("ADMIN_PASSWORD", "AdminPass123!")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    app = create_app(upload_dir=tmp_path)
+    client = TestClient(app)
+    admin_token = client.post(
+        "/api/auth/login",
+        json={"email": "admin@example.com", "password": "AdminPass123!"},
+    ).json()["token"]
+    created_user = client.post(
+        "/api/admin/users",
+        headers=auth(admin_token),
+        json={"email": "reader@example.com", "password": "VoicePass123!", "display_name": "Reader"},
+    )
+    user_token = client.post(
+        "/api/auth/login",
+        json={"email": created_user.json()["email"], "password": "VoicePass123!"},
+    ).json()["token"]
+
+    script_ids = []
+    for title in ["Keep script", "Delete script one", "Delete script two"]:
+        response = client.post(
+            "/api/admin/scripts",
+            headers=auth(admin_token),
+            json={"title": title, "text": f"[neutral] {title} body."},
+        )
+        assert response.status_code == 201
+        script_ids.append(response.json()["id"])
+
+    denied_response = client.post(
+        "/api/admin/scripts/bulk-delete",
+        headers=auth(user_token),
+        json={"script_ids": script_ids[1:]},
+    )
+    assert denied_response.status_code == 403
+
+    empty_response = client.post(
+        "/api/admin/scripts/bulk-delete",
+        headers=auth(admin_token),
+        json={"script_ids": []},
+    )
+    assert empty_response.status_code == 422
+
+    delete_response = client.post(
+        "/api/admin/scripts/bulk-delete",
+        headers=auth(admin_token),
+        json={"script_ids": [script_ids[1], script_ids[2], script_ids[1]]},
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"deleted": 2, "script_ids": [script_ids[1], script_ids[2]]}
+
+    remaining_scripts = client.get("/api/scripts", headers=auth(admin_token)).json()["scripts"]
+    remaining_ids = {script["id"] for script in remaining_scripts}
+    assert script_ids[0] in remaining_ids
+    assert script_ids[1] not in remaining_ids
+    assert script_ids[2] not in remaining_ids
+
+
 def test_user_reports_script_issue_and_admin_sees_ticket(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("ADMIN_PASSWORD", "AdminPass123!")

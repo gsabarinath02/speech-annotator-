@@ -432,7 +432,7 @@ p {
 
 .script-library {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 0.8rem;
   min-width: 0;
   padding: 1rem;
@@ -467,9 +467,37 @@ p {
   border-radius: 8px;
 }
 
-.script-library-item {
+.script-library-toolbar {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.script-library-toolbar-actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.script-library-toolbar .text-button {
+  justify-self: start;
+  min-height: 2.15rem;
+}
+
+.script-library-toolbar .secondary-button {
+  min-height: 2.25rem;
+  padding: 0 0.75rem;
+}
+
+.script-selection-count {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.script-library-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 0.75rem;
   align-items: center;
   min-height: 4.75rem;
@@ -490,7 +518,26 @@ p {
   background: var(--canvas);
 }
 
-.script-library-item span {
+.script-library-item.selected {
+  color: var(--ink);
+  background: #fbfaff;
+  box-shadow: inset 3px 0 0 var(--purple);
+}
+
+.script-library-item-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+}
+
+.script-library-item-main > span {
   display: grid;
   gap: 0.25rem;
   min-width: 0;
@@ -532,6 +579,40 @@ p {
 
 .script-library-item .script-status-chip {
   display: inline-flex;
+}
+
+.script-select-checkbox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+}
+
+.script-select-checkbox input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+
+.script-select-checkbox span {
+  width: 1.05rem;
+  height: 1.05rem;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+}
+
+.script-select-checkbox input:checked + span {
+  background: var(--purple);
+  border-color: var(--purple);
+  box-shadow: inset 0 0 0 3px var(--surface);
+}
+
+.script-select-checkbox input:focus-visible + span {
+  outline: 3px solid rgba(111, 72, 255, 0.22);
+  outline-offset: 2px;
 }
 
 .script-editor {

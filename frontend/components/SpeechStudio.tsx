@@ -58,6 +58,7 @@ import {
   Session,
   User,
   assignScripts,
+  bulkDeleteScripts,
   bulkReviewRecordings,
   confirmPasswordReset,
   createScript,
@@ -798,7 +799,9 @@ function AdminScripts({
   setNotice: (value: string) => void;
 }) {
   const [selectedScriptId, setSelectedScriptId] = useState("");
+  const [selectedScriptIds, setSelectedScriptIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const selectedScript = scripts.find((script) => script.id === selectedScriptId) ?? scripts[0];
   const filteredScripts = scripts.filter((script) => {
@@ -806,6 +809,11 @@ function AdminScripts({
     if (!query) return true;
     return `${script.title} ${script.text}`.toLowerCase().includes(query);
   });
+  const filteredScriptIds = filteredScripts.map((script) => script.id);
+  const existingScriptIdSet = new Set(scripts.map((script) => script.id));
+  const validSelectedScriptIds = selectedScriptIds.filter((scriptId) => existingScriptIdSet.has(scriptId));
+  const selectedScriptIdSet = new Set(validSelectedScriptIds);
+  const allShownSelected = filteredScripts.length > 0 && filteredScripts.every((script) => selectedScriptIdSet.has(script.id));
 
   async function handleCreate() {
     setError("");
@@ -830,12 +838,55 @@ function AdminScripts({
     try {
       const currentIndex = scripts.findIndex((script) => script.id === scriptToDelete.id);
       await deleteScript(session.token, scriptToDelete.id);
+      setSelectedScriptIds((currentIds) => currentIds.filter((scriptId) => scriptId !== scriptToDelete.id));
       const nextScript = scripts[currentIndex + 1] ?? scripts[currentIndex - 1];
       setSelectedScriptId(nextScript?.id ?? "");
       await refresh();
       setNotice("Script deleted.");
     } catch (scriptError) {
       setError(scriptError instanceof Error ? scriptError.message : "Could not delete script.");
+    }
+  }
+
+  function toggleScriptSelection(scriptId: string) {
+    setSelectedScriptIds((currentIds) =>
+      currentIds.includes(scriptId) ? currentIds.filter((currentId) => currentId !== scriptId) : [...currentIds, scriptId],
+    );
+  }
+
+  function toggleShownSelection() {
+    if (!filteredScriptIds.length) return;
+    setSelectedScriptIds((currentIds) => {
+      const shownIdSet = new Set(filteredScriptIds);
+      if (filteredScriptIds.every((scriptId) => currentIds.includes(scriptId))) {
+        return currentIds.filter((scriptId) => !shownIdSet.has(scriptId));
+      }
+      return Array.from(new Set([...currentIds, ...filteredScriptIds]));
+    });
+  }
+
+  async function handleBulkDelete() {
+    const scriptIdsToDelete = validSelectedScriptIds;
+    if (!scriptIdsToDelete.length) return;
+    if (!window.confirm(`Delete ${scriptIdsToDelete.length} selected scripts? This cannot be undone.`)) return;
+
+    setBulkDeleting(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await bulkDeleteScripts(session.token, scriptIdsToDelete);
+      const deletedIdSet = new Set(result.script_ids);
+      setSelectedScriptIds([]);
+      if (selectedScript && deletedIdSet.has(selectedScript.id)) {
+        const nextScript = scripts.find((script) => !deletedIdSet.has(script.id));
+        setSelectedScriptId(nextScript?.id ?? "");
+      }
+      await refresh();
+      setNotice(`${result.deleted} ${result.deleted === 1 ? "script" : "scripts"} deleted.`);
+    } catch (scriptError) {
+      setError(scriptError instanceof Error ? scriptError.message : "Could not delete scripts.");
+    } finally {
+      setBulkDeleting(false);
     }
   }
 
@@ -854,24 +905,54 @@ function AdminScripts({
             <Search size={16} />
             <input placeholder="Search scripts..." value={search} onChange={(event) => setSearch(event.target.value)} />
           </label>
+          <div className="script-library-toolbar">
+            <div className="script-library-toolbar-actions">
+              <button className="text-button" type="button" onClick={toggleShownSelection} disabled={!filteredScripts.length || bulkDeleting}>
+                {allShownSelected ? "Clear shown" : "Select all shown"}
+              </button>
+              <button
+                className="secondary-button danger"
+                type="button"
+                onClick={() => void handleBulkDelete()}
+                disabled={!validSelectedScriptIds.length || bulkDeleting}
+              >
+                <Trash2 size={15} /> {bulkDeleting ? "Deleting" : "Bulk delete"}
+              </button>
+            </div>
+            {validSelectedScriptIds.length ? (
+              <span className="script-selection-count">{validSelectedScriptIds.length} selected for deletion</span>
+            ) : null}
+          </div>
           <div className="script-library-list">
             {filteredScripts.length ? (
               filteredScripts.map((script) => (
-                <button
-                  className={script.id === selectedScript?.id ? "script-library-item active" : "script-library-item"}
-                  type="button"
+                <div
+                  className={[
+                    "script-library-item",
+                    script.id === selectedScript?.id ? "active" : "",
+                    selectedScriptIdSet.has(script.id) ? "selected" : "",
+                  ].filter(Boolean).join(" ")}
                   key={script.id}
-                  onClick={() => setSelectedScriptId(script.id)}
                 >
-                  <span>
-                    <strong>{scriptDisplayTitle(script)}</strong>
-                    <small>{script.updated_at ? `Updated ${formatShortDate(script.updated_at)}` : `${script.line_count} lines`}</small>
-                    <span className={script.is_published === false ? "script-status-chip hidden" : "script-status-chip"}>
-                      {script.is_published === false ? "Hidden from users" : "Visible to users"}
+                  <label className="script-select-checkbox" aria-label={`Select ${scriptDisplayTitle(script)}`}>
+                    <input
+                      type="checkbox"
+                      checked={selectedScriptIdSet.has(script.id)}
+                      onChange={() => toggleScriptSelection(script.id)}
+                    />
+                    <span aria-hidden="true" />
+                  </label>
+                  <button className="script-library-item-main" type="button" onClick={() => setSelectedScriptId(script.id)}>
+                    <span>
+                      <strong>{scriptDisplayTitle(script)}</strong>
+                      <small>{script.updated_at ? `Updated ${formatShortDate(script.updated_at)}` : `${script.line_count} lines`}</small>
+                      <span className={script.is_published === false ? "script-status-chip hidden" : "script-status-chip"}>
+                        {script.is_published === false ? "Hidden from users" : "Visible to users"}
+                      </span>
                     </span>
-                  </span>
-                  <ChevronRight size={15} />
-                </button>
+                    <ChevronRight size={15} />
+                  </button>
+                </div>
               ))
             ) : (
               <EmptyState icon={<FileText size={18} />} text="No scripts found." />

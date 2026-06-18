@@ -70,6 +70,10 @@ class ScriptCreateRequest(BaseModel):
     is_published: bool = True
 
 
+class BulkScriptDeleteRequest(BaseModel):
+    script_ids: list[str]
+
+
 class ScriptTicketCreateRequest(BaseModel):
     script_id: str
     message: str
@@ -567,6 +571,19 @@ def create_app(upload_dir: str | Path | None = None) -> FastAPI:
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail="Script not found") from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.post("/api/admin/scripts/bulk-delete")
+    def bulk_delete_scripts(
+        delete_request: BulkScriptDeleteRequest,
+        _admin: dict[str, Any] = Depends(require_admin),
+    ) -> dict[str, object]:
+        try:
+            deleted_script_ids = account_store.bulk_delete_scripts(delete_request.script_ids)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Script not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"deleted": len(deleted_script_ids), "script_ids": deleted_script_ids}
 
     @app.post("/api/tickets", status_code=201)
     def create_script_ticket(

@@ -51,6 +51,11 @@ export type ScriptInput = {
   is_published?: boolean;
 };
 
+export type BulkDeleteScriptsResponse = {
+  deleted: number;
+  script_ids: string[];
+};
+
 export type ScriptTicket = {
   id: string;
   status: "open" | "resolved" | string;
@@ -365,6 +370,15 @@ export async function deleteScript(token: string, scriptId: string): Promise<voi
   if (!response.ok) {
     await readJsonOrThrow(response, "Could not delete script.");
   }
+}
+
+export async function bulkDeleteScripts(token: string, scriptIds: string[]): Promise<BulkDeleteScriptsResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/scripts/bulk-delete`, {
+    method: "POST",
+    headers: { ...authHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ script_ids: scriptIds }),
+  });
+  return readJsonOrThrow<BulkDeleteScriptsResponse>(response, "Could not delete scripts.");
 }
 
 export async function fetchAdminRecordings(token: string): Promise<AdminRecording[]> {

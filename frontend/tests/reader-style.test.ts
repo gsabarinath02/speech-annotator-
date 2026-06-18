@@ -262,6 +262,22 @@ describe("reader presentation styles", () => {
     expect(css).toContain(".script-status-chip.hidden");
   });
 
+  it("lets admins select and bulk delete scripts", () => {
+    const component = readComponent();
+    const css = readFileSync(cssPath, "utf8");
+
+    expect(component).toContain("bulkDeleteScripts");
+    expect(component).toContain("selectedScriptIds");
+    expect(component).toContain("Bulk delete");
+    expect(component).toContain("Select all shown");
+    expect(component).toContain("selected for deletion");
+    expect(component).toContain("script-library-toolbar");
+    expect(component).toContain("script-select-checkbox");
+    expect(css).toContain(".script-library-toolbar");
+    expect(css).toContain(".script-select-checkbox");
+    expect(css).toContain(".script-library-item.selected");
+  });
+
   it("gives readers a waveform speech editor for correcting long recordings", () => {
     const component = readComponent();
     const css = readFileSync(cssPath, "utf8");

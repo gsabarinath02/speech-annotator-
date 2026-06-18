@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   assignScripts,
+  bulkDeleteScripts,
   bulkReviewRecordings,
   createScript,
   createDatasetSnapshot,
@@ -238,6 +239,24 @@ describe("speech studio API helpers", () => {
       expect.objectContaining({
         method: "PUT",
         body: JSON.stringify({ title: "Published", text: "[neutral] Published line.", is_published: true }),
+      }),
+    );
+  });
+
+  it("sends selected scripts for bulk deletion", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(await jsonResponse({ deleted: 2, script_ids: ["script-1", "script-2"] }));
+
+    const result = await bulkDeleteScripts("session-token", ["script-1", "script-2"]);
+
+    expect(result).toEqual({ deleted: 2, script_ids: ["script-1", "script-2"] });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/admin/scripts/bulk-delete",
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: "Bearer session-token", "Content-Type": "application/json" },
+        body: JSON.stringify({ script_ids: ["script-1", "script-2"] }),
       }),
     );
   });

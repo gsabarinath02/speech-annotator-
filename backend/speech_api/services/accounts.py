@@ -128,6 +128,17 @@ def normalize_is_published(value: Any) -> bool:
     return bool(value)
 
 
+def normalize_script_ids(script_ids: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_script_id in script_ids:
+        script_id = str(raw_script_id).strip()
+        if script_id and script_id not in seen:
+            normalized.append(script_id)
+            seen.add(script_id)
+    return normalized
+
+
 def validate_password_strength(password: str, label: str = "Password") -> None:
     if len(password) < MIN_PASSWORD_LENGTH:
         raise ValueError(f"{label} must be at least {MIN_PASSWORD_LENGTH} characters")
@@ -735,6 +746,27 @@ class AccountStore:
             assignment for assignment in state.get("script_assignments", []) if assignment.get("script_id") != script_id
         ]
         self.save(state)
+
+    def bulk_delete_scripts(self, script_ids: list[str]) -> list[str]:
+        clean_script_ids = normalize_script_ids(script_ids)
+        if not clean_script_ids:
+            raise ValueError("At least one script is required")
+
+        state = self.load()
+        scripts = state.get("scripts", [])
+        existing_script_ids = {str(script.get("id", "")) for script in scripts}
+        if not set(clean_script_ids).issubset(existing_script_ids):
+            raise NotFoundError("Script not found")
+
+        delete_ids = set(clean_script_ids)
+        next_scripts = [script for script in scripts if script.get("id") not in delete_ids]
+        state["scripts"] = next_scripts
+        state["prompts"] = self._scripts_as_prompts([self._normalize_script(item) for item in next_scripts])
+        state["script_assignments"] = [
+            assignment for assignment in state.get("script_assignments", []) if assignment.get("script_id") not in delete_ids
+        ]
+        self.save(state)
+        return clean_script_ids
 
     def create_script_ticket(
         self,
@@ -1496,6 +1528,19 @@ class PostgresAccountStore(AccountStore):
             result = connection.execute("DELETE FROM scripts WHERE id = %s", (script_id,))
             if result.rowcount == 0:
                 raise NotFoundError("Script not found")
+
+    def bulk_delete_scripts(self, script_ids: list[str]) -> list[str]:
+        clean_script_ids = normalize_script_ids(script_ids)
+        if not clean_script_ids:
+            raise ValueError("At least one script is required")
+
+        with self.pool.connection() as connection:
+            rows = connection.execute("SELECT id FROM scripts WHERE id = ANY(%s)", (clean_script_ids,)).fetchall()
+            found_script_ids = {str(row["id"]) for row in rows}
+            if not set(clean_script_ids).issubset(found_script_ids):
+                raise NotFoundError("Script not found")
+            connection.execute("DELETE FROM scripts WHERE id = ANY(%s)", (clean_script_ids,))
+        return clean_script_ids
 
     def create_script_ticket(
         self,
